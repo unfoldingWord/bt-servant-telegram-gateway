@@ -8,6 +8,18 @@ Telegram Bot API webhook -> Netlify Function -> `handleIncomingMessage()` -> Eng
 
 Progress updates from engine are delivered through a separate Netlify Function and forwarded back to Telegram.
 
+### End-to-end flow
+
+1. Telegram sends an update to `/api/telegram-webhook`.
+2. The webhook validates `WEBHOOK_SECRET_TOKEN` when it is configured.
+3. The webhook parses the update and passes text messages to `handleIncomingMessage()`.
+4. `handleIncomingMessage()` sends a `typing` action, calls `engine-client`, and waits for the engine response.
+5. `engine-client` calls `/api/v1/chat` with `client_id: "telegram"`, `Authorization: Bearer ENGINE_API_KEY`, `message_key`, optional `org`, and progress settings.
+6. Long engine replies are split into chunks of up to 4000 characters before they are sent back to Telegram.
+7. The engine can send progress payloads to `/api/progress-callback`.
+8. The progress handler validates `X-Engine-Token` against `ENGINE_API_KEY` and forwards the update to Telegram.
+9. Unsupported message types are ignored or returned as unsupported; they never reach the engine flow.
+
 ## Requirements
 
 - Node.js 20+
