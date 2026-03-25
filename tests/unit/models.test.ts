@@ -1,0 +1,121 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  MessageType,
+  getMessageAge,
+  isMessageTooOld,
+  isSupportedMessageType,
+  parseTelegramUpdate,
+} from '../../src/core/models.js';
+
+describe('core models', () => {
+  it('parses a text telegram update', () => {
+    const update = {
+      update_id: 1,
+      message: {
+        message_id: 42,
+        from: {
+          id: 1001,
+          is_bot: false,
+          first_name: 'Alex',
+        },
+        chat: {
+          id: 2002,
+          type: 'private' as const,
+        },
+        date: 1_700_000_000,
+        text: 'hello',
+      },
+    };
+
+    expect(parseTelegramUpdate(update, 3600)).toEqual({
+      user_id: '1001',
+      chat_id: '2002',
+      message_id: '42',
+      message_type: MessageType.TEXT,
+      timestamp: 1_700_000_000,
+      text: 'hello',
+      file_id: null,
+      message_age_cutoff: 3600,
+    });
+  });
+
+  it('ignores bot messages', () => {
+    const update = {
+      update_id: 1,
+      message: {
+        message_id: 42,
+        from: {
+          id: 1001,
+          is_bot: true,
+          first_name: 'Bot',
+        },
+        chat: {
+          id: 2002,
+          type: 'private' as const,
+        },
+        date: 1_700_000_000,
+        text: 'hello',
+      },
+    };
+
+    expect(parseTelegramUpdate(update, 3600)).toBeNull();
+  });
+
+  it('marks non-text updates as unsupported through UNKNOWN type', () => {
+    const update = {
+      update_id: 1,
+      message: {
+        message_id: 42,
+        from: {
+          id: 1001,
+          is_bot: false,
+          first_name: 'Alex',
+        },
+        chat: {
+          id: 2002,
+          type: 'private' as const,
+        },
+        date: 1_700_000_000,
+        voice: {
+          file_id: 'voice-file',
+          file_unique_id: 'voice-unique',
+          duration: 12,
+        },
+      },
+    };
+
+    expect(parseTelegramUpdate(update, 3600)).toEqual({
+      user_id: '1001',
+      chat_id: '2002',
+      message_id: '42',
+      message_type: MessageType.UNKNOWN,
+      timestamp: 1_700_000_000,
+      text: '',
+      file_id: null,
+      message_age_cutoff: 3600,
+    });
+    expect(isSupportedMessageType(MessageType.UNKNOWN)).toBe(false);
+  });
+
+  it('detects old messages and computes message age', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-01-01T00:10:00Z'));
+
+    const message = {
+      user_id: '1001',
+      chat_id: '2002',
+      message_id: '42',
+      message_type: MessageType.TEXT,
+      timestamp: Math.floor(new Date('2024-01-01T00:00:00Z').getTime() / 1000),
+      text: 'hello',
+      file_id: null,
+      message_age_cutoff: 300,
+    };
+
+    expect(getMessageAge(message)).toBe(600);
+    expect(isMessageTooOld(message)).toBe(true);
+
+    vi.useRealTimers();
+  });
+});
