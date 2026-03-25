@@ -5,7 +5,10 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "rootDir": ".",
-    "outDir": "dist",
+    "outDir": "netlify/functions",
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
@@ -20,6 +23,9 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "netlify/functions/**/*.js",
+    "netlify/functions/**/*.d.ts",
+    "netlify/functions/**/*.js.map",
+    "netlify/functions/**/*.d.ts.map"
   ]
 }
