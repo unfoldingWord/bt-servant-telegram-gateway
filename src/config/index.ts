@@ -1,25 +1,20 @@
 import dotenv from 'dotenv';
 
-// Load environment variables
 dotenv.config();
 
 interface Config {
-  // Telegram Bot API
   telegramBotToken: string;
   webhookSecretToken: string | undefined;
 
-  // Engine Connection
   engineBaseUrl: string;
   engineApiKey: string;
+  engineOrg: string | undefined;
 
-  // Progress Callbacks
   gatewayPublicUrl: string;
   progressThrottleSeconds: number;
 
-  // Message Filtering
   messageAgeCutoffInSeconds: number;
 
-  // Logging
   logLevel: string;
 }
 
@@ -29,6 +24,11 @@ function getEnvVar(name: string, defaultValue?: string): string {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value || defaultValue || '';
+}
+
+function getOptionalEnvVar(name: string): string | undefined {
+  const value = process.env[name];
+  return value && value.trim() ? value : undefined;
 }
 
 function getEnvNumber(name: string, defaultValue: number): number {
@@ -52,5 +52,5 @@ export const config: Config = {
   progressThrottleSeconds: getEnvNumber('PROGRESS_THROTTLE_SECONDS', 3.0),
   messageAgeCutoffInSeconds: getEnvNumber('MESSAGE_AGE_CUTOFF_IN_SECONDS', 3600),
   logLevel: getEnvVar('LOG_LEVEL', 'INFO'),
+  engineOrg: getOptionalEnvVar('ENGINE_ORG'),
 };
-
