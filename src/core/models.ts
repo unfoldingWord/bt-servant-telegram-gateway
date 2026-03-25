@@ -1,13 +1,5 @@
 export enum MessageType {
   TEXT = 'text',
-  VOICE = 'voice',
-  AUDIO = 'audio',
-  PHOTO = 'photo',
-  DOCUMENT = 'document',
-  VIDEO = 'video',
-  STICKER = 'sticker',
-  LOCATION = 'location',
-  CONTACT = 'contact',
   UNKNOWN = 'unknown',
 }
 
@@ -93,6 +85,10 @@ export interface TelegramDocument {
   file_size?: number;
 }
 
+type TelegramMessageContent =
+  | { messageType: MessageType.TEXT; text: string; fileId: null }
+  | { messageType: MessageType.UNKNOWN; text: string; fileId: null };
+
 /**
  * Parse a Telegram Update object into an IncomingMessage.
  */
@@ -115,41 +111,27 @@ export function parseTelegramUpdate(
   const message_id = String(message.message_id);
   const timestamp = message.date;
 
-  // Determine message type and extract content
-  let message_type = MessageType.UNKNOWN;
-  let text = '';
-  let file_id: string | null = null;
-
+  let content: TelegramMessageContent = {
+    messageType: MessageType.UNKNOWN,
+    text: '',
+    fileId: null,
+  };
   if (message.text) {
-    message_type = MessageType.TEXT;
-    text = message.text;
-  } else if (message.voice) {
-    message_type = MessageType.VOICE;
-    file_id = message.voice.file_id;
-    text = message.caption || '';
-  } else if (message.audio) {
-    message_type = MessageType.AUDIO;
-    file_id = message.audio.file_id;
-    text = message.caption || '';
-  } else if (message.photo && message.photo.length > 0) {
-    message_type = MessageType.PHOTO;
-    // Get largest photo
-    file_id = message.photo[message.photo.length - 1].file_id;
-    text = message.caption || '';
-  } else if (message.document) {
-    message_type = MessageType.DOCUMENT;
-    file_id = message.document.file_id;
-    text = message.caption || '';
+    content = {
+      messageType: MessageType.TEXT,
+      text: message.text,
+      fileId: null,
+    };
   }
 
   return {
     user_id,
     chat_id,
     message_id,
-    message_type,
+    message_type: content.messageType,
     timestamp,
-    text,
-    file_id,
+    text: content.text,
+    file_id: content.fileId,
     message_age_cutoff: messageAgeCutoff,
   };
 }
@@ -158,9 +140,7 @@ export function parseTelegramUpdate(
  * Check if message type is supported for processing.
  */
 export function isSupportedMessageType(messageType: MessageType): boolean {
-  return messageType === MessageType.TEXT || 
-         messageType === MessageType.VOICE || 
-         messageType === MessageType.AUDIO;
+  return messageType === MessageType.TEXT;
 }
 
 /**
@@ -179,4 +159,3 @@ export function getMessageAge(message: IncomingMessage): number {
   const currentTime = Math.floor(Date.now() / 1000);
   return currentTime - message.timestamp;
 }
-
