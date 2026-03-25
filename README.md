@@ -93,6 +93,42 @@ The project is configured with:
 - `functions = "netlify/functions"`
 - `node_bundler = "esbuild"`
 
+### Netlify env vars
+
+Set these values in the Netlify dashboard or via CLI before production rollout:
+
+- `TELEGRAM_BOT_TOKEN`
+- `ENGINE_BASE_URL`
+- `ENGINE_API_KEY`
+- `WEBHOOK_SECRET_TOKEN` if webhook secret validation is enabled
+- `ENGINE_ORG` if the deployment should target a specific org
+- `GATEWAY_PUBLIC_URL` for progress callbacks
+- `PROGRESS_THROTTLE_SECONDS`
+- `MESSAGE_AGE_CUTOFF_IN_SECONDS`
+- `LOG_LEVEL`
+
+### Deploy and webhook checklist
+
+1. Deploy to your staging branch or production branch in Netlify.
+2. Copy the deployed public URL.
+3. Register the webhook with Telegram:
+
+```bash
+curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://<your-site>.netlify.app/api/telegram-webhook",
+    "secret_token": "'"${WEBHOOK_SECRET_TOKEN}"'"
+  }'
+```
+
+4. If `WEBHOOK_SECRET_TOKEN` is not used, omit the `secret_token` field.
+5. Verify:
+   - text messages are answered
+   - progress updates arrive
+   - unsupported message types are ignored or rejected consistently
+6. Inspect Netlify logs for webhook, progress, and engine errors after the first live request.
+
 ## Troubleshooting
 
 - Netlify timeout:
