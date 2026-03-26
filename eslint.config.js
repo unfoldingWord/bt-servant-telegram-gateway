@@ -11,8 +11,10 @@ export default tseslint.config(
     ignores: [
       'node_modules/',
       'dist/',
+      '.netlify/',
       'netlify/functions/**/*.js',
       'netlify/functions/**/*.d.ts',
+      'vitest.config.ts',
     ],
   },
   ...tseslint.configs.recommendedTypeChecked.map((config) => ({
