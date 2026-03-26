@@ -1,6 +1,7 @@
 import { isMessageTooOld, isSupportedMessageType, type IncomingMessage } from '../core/models.js';
 import { EngineClient } from './engine-client.js';
 import { chunkMessage } from './chunking.js';
+import { formatTelegramHtml } from './telegram-format.js';
 import { TelegramClient } from '../telegram/client.js';
 
 export interface MessageHandlerDependencies {
@@ -61,11 +62,25 @@ export async function handleIncomingMessage(
       dependencies.progressThrottleSeconds
     );
 
+    console.info('Engine response text', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+      text: previewText(response.message),
+    });
+
     const chunks = chunkMessage(response.message);
     let sentChunks = 0;
 
     for (const chunk of chunks) {
-      const ok = await telegramClient.sendTextMessage(message.chat_id, chunk);
+      const renderedChunk = formatTelegramHtml(chunk);
+      console.info('Sending telegram chunk', {
+        userId: message.user_id,
+        chatId: message.chat_id,
+        text: previewText(chunk),
+        html: previewText(renderedChunk),
+      });
+
+      const ok = await telegramClient.sendTextMessage(message.chat_id, renderedChunk, 'HTML');
       if (ok) {
         sentChunks += 1;
       }
@@ -89,4 +104,13 @@ export async function handleIncomingMessage(
     await telegramClient.sendTextMessage(message.chat_id, fallbackMessage);
     return { handled: false, reason: 'engine_error' };
   }
+}
+
+function previewText(text: string, maxLength = 240): string {
+  const normalized = text.replace(/\s+/gu, ' ').trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1)}…`;
 }

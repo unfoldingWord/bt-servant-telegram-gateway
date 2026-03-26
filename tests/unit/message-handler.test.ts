@@ -6,6 +6,7 @@ process.env.ENGINE_API_KEY = 'engine-key';
 process.env.GATEWAY_PUBLIC_URL = 'https://gateway.example.com';
 
 import { MessageType } from '../../src/core/models.js';
+import { formatTelegramHtml } from '../../src/services/telegram-format.js';
 
 describe('handleIncomingMessage', () => {
   afterEach(() => {
@@ -122,5 +123,45 @@ describe('handleIncomingMessage', () => {
 
     expect(telegramClient.sendTextMessage).toHaveBeenCalledWith('2002', 'fallback');
     expect(result).toEqual({ handled: false, reason: 'engine_error' });
+  });
+
+  it('formats engine response as HTML before sending', async () => {
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn().mockResolvedValue({
+        message: 'Hello **Bold** and _italic_.',
+      }),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: 'hello',
+        file_id: null,
+        message_age_cutoff: 3600,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(telegramClient.sendTextMessage).toHaveBeenCalledWith(
+      '2002',
+      formatTelegramHtml('Hello **Bold** and _italic_.'),
+      'HTML'
+    );
   });
 });
