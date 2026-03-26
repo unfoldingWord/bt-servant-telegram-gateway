@@ -26,7 +26,13 @@ export interface EngineChatRequest {
 interface EngineChatApiResponse {
   response?: string;
   message?: string;
+  text?: string;
+  reply?: string;
+  output?: string;
+  result?: string;
+  responses?: unknown;
   message_key?: string;
+  data?: EngineChatApiResponse;
   [key: string]: unknown;
 }
 
@@ -79,12 +85,22 @@ export class EngineClient {
 
     try {
       const response = await this.http.post<EngineChatApiResponse>('/api/v1/chat', payload);
+      console.info('Engine chat response received', {
+        userId,
+        messageKey,
+        keys: Object.keys(response.data ?? {}),
+      });
       return this.mapChatResponse(response.data, messageKey);
     } catch (error) {
       const retryDelay = this.getRetryDelayMs(error);
       if (retryDelay !== null) {
         await this.sleep(retryDelay);
         const response = await this.http.post<EngineChatApiResponse>('/api/v1/chat', payload);
+        console.info('Engine chat response received after retry', {
+          userId,
+          messageKey,
+          keys: Object.keys(response.data ?? {}),
+        });
         return this.mapChatResponse(response.data, messageKey);
       }
 
@@ -127,11 +143,92 @@ export class EngineClient {
   }
 
   private mapChatResponse(data: EngineChatApiResponse, messageKey: string): ChatResponse {
+    const message = this.extractMessage(data);
     return {
-      message: String(data.response ?? data.message ?? ''),
+      message,
       message_key: String(data.message_key ?? messageKey),
       ...data,
     };
+  }
+
+  private extractMessage(data: EngineChatApiResponse | undefined): string {
+    if (!data) {
+      return '';
+    }
+
+    const responseText = this.extractResponsesText(data.responses);
+    if (responseText) {
+      return responseText;
+    }
+
+    const directMessage =
+      data.response ??
+      data.message ??
+      data.text ??
+      data.reply ??
+      data.output ??
+      data.result;
+
+    if (typeof directMessage === 'string' && directMessage.trim()) {
+      return directMessage;
+    }
+
+    if (data.data && typeof data.data === 'object') {
+      return this.extractMessage(data.data);
+    }
+
+    return '';
+  }
+
+  private extractResponsesText(responses: unknown): string {
+    if (typeof responses === 'string') {
+      return responses.trim();
+    }
+
+    if (!Array.isArray(responses)) {
+      return '';
+    }
+
+    const parts = responses
+      .flatMap((item) => this.extractResponseItemText(item))
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+
+    return parts.join('\n').trim();
+  }
+
+  private extractResponseItemText(item: unknown): string[] {
+    if (typeof item === 'string') {
+      return [item];
+    }
+
+    if (!item || typeof item !== 'object') {
+      return [];
+    }
+
+    const candidate = item as Record<string, unknown>;
+    const values: string[] = [];
+
+    for (const key of ['text', 'message', 'response', 'output', 'result']) {
+      const value = candidate[key];
+      if (typeof value === 'string' && value.trim()) {
+        values.push(value);
+      }
+    }
+
+    if (values.length > 0) {
+      return values;
+    }
+
+    for (const key of ['responses', 'data']) {
+      const value = candidate[key];
+      const nested = this.extractResponsesText(value);
+      if (nested) {
+        return [nested];
+      }
+    }
+
+    return [];
   }
 
   private mapPreferencesResponse(data: EnginePreferencesApiResponse): UserPreferences {

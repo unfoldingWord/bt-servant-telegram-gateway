@@ -77,6 +77,37 @@ describe('EngineClient', () => {
     await expect(client.updateUserPreferences('user-1', { timezone: 'UTC' })).resolves.toEqual({ timezone: 'UTC' });
   });
 
+  it('extracts text from alternate engine response fields', async () => {
+    create.mockReturnValue({ post, get, put });
+    post.mockResolvedValue({ data: { text: 'hello from text field' } });
+
+    const { EngineClient } = await import('../../src/services/engine-client.js');
+    const client = new EngineClient('https://engine.example.com', 'engine-key');
+
+    await expect(client.sendTextMessage('user-1', 'hello')).resolves.toMatchObject({
+      message: 'hello from text field',
+    });
+  });
+
+  it('extracts text from responses arrays', async () => {
+    create.mockReturnValue({ post, get, put });
+    post.mockResolvedValue({
+      data: {
+        responses: [
+          { text: 'first part' },
+          { message: 'second part' },
+        ],
+      },
+    });
+
+    const { EngineClient } = await import('../../src/services/engine-client.js');
+    const client = new EngineClient('https://engine.example.com', 'engine-key');
+
+    await expect(client.sendTextMessage('user-1', 'hello')).resolves.toMatchObject({
+      message: 'first part\nsecond part',
+    });
+  });
+
   it('retries on concurrent request rejection using retry_after_ms', async () => {
     create.mockReturnValue({ post, get, put });
     post
