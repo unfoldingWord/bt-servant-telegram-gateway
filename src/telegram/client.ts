@@ -23,9 +23,9 @@ interface TelegramWebhookInfo {
 export class TelegramClient {
   private readonly http: AxiosInstance;
 
-  constructor(botToken: string = config.telegramBotToken) {
+  constructor(botToken: string = config.telegramBotToken, baseUrl: string = `https://api.telegram.org/bot${botToken}`) {
     this.http = axios.create({
-      baseURL: `https://api.telegram.org/bot${botToken}`,
+      baseURL: baseUrl,
       timeout: 10000,
     });
   }

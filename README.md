@@ -164,3 +164,28 @@ yarn build
 yarn lint
 yarn dev
 ```
+
+## Live integration smoke
+
+This repository also includes an opt-in live smoke test that hits a real gateway URL and real downstream services.
+
+Set these environment variables before running it:
+
+- `GATEWAY_PUBLIC_URL` - public base URL for the deployed or ngrok-exposed gateway
+- `TELEGRAM_BOT_TOKEN` - token for the live Telegram bot
+- `LIVE_E2E_CHAT_ID` - numeric Telegram chat ID that the bot can message
+- `WEBHOOK_SECRET_TOKEN` - optional, included when your webhook is protected
+
+Run it with:
+
+```bash
+yarn test:integration
+```
+
+What it checks:
+
+- the live gateway accepts a Telegram-shaped update payload
+- the live gateway reaches `bt-servant-engine`
+- the live gateway sends a message back through the live Telegram API
+
+If the live env vars are missing, the smoke test is skipped automatically.

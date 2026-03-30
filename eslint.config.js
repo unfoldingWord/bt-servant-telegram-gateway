@@ -15,6 +15,7 @@ export default tseslint.config(
       'netlify/functions/**/*.js',
       'netlify/functions/**/*.d.ts',
       'vitest.config.ts',
+      'vitest.integration.config.ts',
     ],
   },
   ...tseslint.configs.recommendedTypeChecked.map((config) => ({
