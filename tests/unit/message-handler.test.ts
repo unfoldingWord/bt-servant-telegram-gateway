@@ -185,4 +185,48 @@ describe('handleIncomingMessage', () => {
     );
   });
 
+  it('resets private conversations via engine and confirms to the user', async () => {
+    const telegramClient = {
+      sendChatAction: vi.fn(),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      resetConversation: vi.fn().mockResolvedValue(undefined),
+      sendTextMessage: vi.fn(),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: '/reset',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(engineClient.resetConversation).toHaveBeenCalledWith('1001', {
+      chatType: 'private',
+      chatId: '2002',
+      threadId: undefined,
+    });
+    expect(telegramClient.sendTextMessage).toHaveBeenCalledWith('2002', 'Conversation has been reset.');
+    expect(result).toEqual({ handled: true, reason: 'reset', sentChunks: 1 });
+    expect(engineClient.sendTextMessage).not.toHaveBeenCalled();
+  });
+
 });
