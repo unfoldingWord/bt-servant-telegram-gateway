@@ -52,6 +52,42 @@ describe('EngineClient', () => {
     expect(result.message_key).toBe('server-key');
   });
 
+  it('sends extended chat context when provided', async () => {
+    create.mockReturnValue({ post, get, put });
+    post.mockResolvedValue({ data: { response: 'ok' } });
+
+    const { EngineClient } = await import('../../src/services/engine-client.js');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1');
+
+    await client.sendTextMessage(
+      'user-1',
+      'hello',
+      {
+        chatType: 'group',
+        chatId: 'group-42',
+        speaker: 'Alice',
+        threadId: 'thread-7',
+        responseLanguageHint: 'ru',
+      },
+      'https://gateway/progress',
+      5
+    );
+
+    expect(post).toHaveBeenCalledWith('/api/v1/chat', expect.objectContaining({
+      client_id: 'telegram',
+      user_id: 'user-1',
+      message: 'hello',
+      chat_type: 'group',
+      chat_id: 'group-42',
+      speaker: 'Alice',
+      thread_id: 'thread-7',
+      response_language_hint: 'ru',
+      progress_throttle_seconds: 5,
+      org: 'org-1',
+      progress_callback_url: 'https://gateway/progress',
+    }));
+  });
+
   it('returns empty preferences for missing user prefs', async () => {
     create.mockReturnValue({ post, get, put });
     get.mockRejectedValue({
@@ -126,5 +162,34 @@ describe('EngineClient', () => {
 
     await expect(client.sendTextMessage('user-1', 'hello')).resolves.toMatchObject({ message: 'ok' });
     expect(post).toHaveBeenCalledTimes(2);
+  });
+
+  it('resets private conversation history', async () => {
+    create.mockReturnValue({ post, get, put, delete: vi.fn().mockResolvedValue({ data: {} }) });
+    const del = vi.fn().mockResolvedValue({ data: {} });
+    create.mockReturnValue({ post, get, put, delete: del });
+
+    const { EngineClient } = await import('../../src/services/engine-client.js');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1');
+
+    await client.resetConversation('user-1', { chatType: 'private' });
+
+    expect(del).toHaveBeenCalledWith('/api/v1/orgs/org-1/users/user-1/history', {
+      data: { org: 'org-1' },
+    });
+  });
+
+  it('resets group conversation history', async () => {
+    const del = vi.fn().mockResolvedValue({ data: {} });
+    create.mockReturnValue({ post, get, put, delete: del });
+
+    const { EngineClient } = await import('../../src/services/engine-client.js');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1');
+
+    await client.resetConversation('user-1', { chatType: 'group', chatId: 'chat-99' });
+
+    expect(del).toHaveBeenCalledWith('/api/v1/admin/orgs/org-1/groups/chat-99/history', {
+      data: { org: 'org-1' },
+    });
   });
 });

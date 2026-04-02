@@ -12,15 +12,34 @@ export interface UserPreferences {
   [key: string]: unknown;
 }
 
+export interface ResetConversationOptions {
+  chatType: 'private' | 'group' | 'supergroup';
+  chatId?: string;
+  threadId?: string;
+}
+
 export interface EngineChatRequest {
   client_id: 'telegram';
   user_id: string;
   message: string;
   message_key: string;
+  chat_type?: 'private' | 'group' | 'supergroup';
+  chat_id?: string;
+  speaker?: string;
+  thread_id?: string;
+  response_language_hint?: string;
   progress_mode?: 'initially_allow';
   progress_throttle_seconds?: number;
   org?: string;
   progress_callback_url?: string;
+}
+
+export interface EngineMessageContext {
+  chatType?: 'private' | 'group' | 'supergroup';
+  chatId?: string;
+  speaker?: string;
+  threadId?: string;
+  responseLanguageHint?: string;
 }
 
 interface EngineChatApiResponse {
@@ -69,16 +88,49 @@ export class EngineClient {
     userId: string,
     message: string,
     progressCallbackUrl?: string,
+    progressThrottleSeconds?: number
+  ): Promise<ChatResponse>;
+  async sendTextMessage(
+    userId: string,
+    message: string,
+    context: EngineMessageContext,
+    progressCallbackUrl?: string,
+    progressThrottleSeconds?: number
+  ): Promise<ChatResponse>;
+  async sendTextMessage(
+    userId: string,
+    message: string,
+    contextOrProgressCallbackUrl?: string | EngineMessageContext,
+    progressCallbackUrlOrThrottleSeconds?: string | number,
     progressThrottleSeconds: number = config.progressThrottleSeconds
   ): Promise<ChatResponse> {
+    const context = typeof contextOrProgressCallbackUrl === 'string' || contextOrProgressCallbackUrl === undefined
+      ? {}
+      : contextOrProgressCallbackUrl;
+    const progressCallbackUrl =
+      typeof contextOrProgressCallbackUrl === 'string'
+        ? contextOrProgressCallbackUrl
+        : typeof progressCallbackUrlOrThrottleSeconds === 'string'
+          ? progressCallbackUrlOrThrottleSeconds
+          : undefined;
+    const resolvedThrottleSeconds =
+      typeof progressCallbackUrlOrThrottleSeconds === 'number'
+        ? progressCallbackUrlOrThrottleSeconds
+        : progressThrottleSeconds;
+
     const messageKey = this.buildMessageKey(userId, message);
     const payload: EngineChatRequest = {
       client_id: 'telegram',
       user_id: userId,
       message,
       message_key: messageKey,
+      ...(context.chatType ? { chat_type: context.chatType } : {}),
+      ...(context.chatId ? { chat_id: context.chatId } : {}),
+      ...(context.speaker ? { speaker: context.speaker } : {}),
+      ...(context.threadId ? { thread_id: context.threadId } : {}),
+      ...(context.responseLanguageHint ? { response_language_hint: context.responseLanguageHint } : {}),
       progress_mode: 'initially_allow',
-      progress_throttle_seconds: progressThrottleSeconds,
+      progress_throttle_seconds: resolvedThrottleSeconds,
       ...(this.org ? { org: this.org } : {}),
       ...(progressCallbackUrl ? { progress_callback_url: progressCallbackUrl } : {}),
     };
@@ -138,8 +190,36 @@ export class EngineClient {
     }
   }
 
+  async resetConversation(userId: string, options: ResetConversationOptions): Promise<void> {
+    const path = this.resetPath(userId, options);
+    try {
+      await this.http.delete(path, {
+        data: {
+          ...(this.org ? { org: this.org } : {}),
+        },
+      });
+    } catch (error) {
+      this.logHttpError({ operation: 'resetConversation', path, userId }, error);
+      throw error;
+    }
+  }
+
   private preferencesPath(userId: string): string {
     return `/api/v1/orgs/${encodeURIComponent(this.org ?? 'DEFAULT_ORG')}/users/${encodeURIComponent(userId)}/preferences`;
+  }
+
+  private resetPath(userId: string, options: ResetConversationOptions): string {
+    const org = encodeURIComponent(this.org ?? 'DEFAULT_ORG');
+    if (options.chatType === 'private') {
+      return `/api/v1/orgs/${org}/users/${encodeURIComponent(userId)}/history`;
+    }
+
+    const chatId = encodeURIComponent(options.chatId ?? userId);
+    if (options.threadId && options.threadId.trim()) {
+      return `/api/v1/admin/orgs/${org}/groups/${chatId}/threads/${encodeURIComponent(options.threadId)}/history`;
+    }
+
+    return `/api/v1/admin/orgs/${org}/groups/${chatId}/history`;
   }
 
   private mapChatResponse(data: EngineChatApiResponse, messageKey: string): ChatResponse {

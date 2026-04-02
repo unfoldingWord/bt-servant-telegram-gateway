@@ -33,12 +33,14 @@ describe('handleIncomingMessage', () => {
       {
         user_id: '1001',
         chat_id: '2002',
+        chat_type: 'private',
         message_id: '42',
         message_type: MessageType.TEXT,
         timestamp: Math.floor(Date.now() / 1000),
         text: 'hello',
         file_id: null,
         message_age_cutoff: 3600,
+        speaker: 'Alex',
       },
       {
         telegramClient: telegramClient as never,
@@ -48,7 +50,19 @@ describe('handleIncomingMessage', () => {
     );
 
     expect(telegramClient.sendChatAction).toHaveBeenCalledWith('2002', 'typing');
-    expect(engineClient.sendTextMessage).toHaveBeenCalledWith('1001', 'hello', undefined, 3);
+    expect(engineClient.sendTextMessage).toHaveBeenCalledWith(
+      '1001',
+      'hello',
+      {
+        chatType: 'private',
+        chatId: '2002',
+        speaker: 'Alex',
+        threadId: undefined,
+        responseLanguageHint: undefined,
+      },
+      undefined,
+      3
+    );
     expect(telegramClient.sendTextMessage).toHaveBeenCalledTimes(3);
     expect(result).toEqual({ handled: true, sentChunks: 3 });
   });
@@ -71,12 +85,14 @@ describe('handleIncomingMessage', () => {
       {
         user_id: '1001',
         chat_id: '2002',
+        chat_type: 'private',
         message_id: '42',
         message_type: MessageType.UNKNOWN,
         timestamp: Math.floor(Date.now() / 1000),
         text: '',
         file_id: null,
         message_age_cutoff: 3600,
+        speaker: 'Alex',
       },
       {
         telegramClient: telegramClient as never,
@@ -107,12 +123,14 @@ describe('handleIncomingMessage', () => {
       {
         user_id: '1001',
         chat_id: '2002',
+        chat_type: 'private',
         message_id: '42',
         message_type: MessageType.TEXT,
         timestamp: Math.floor(Date.now() / 1000),
         text: 'hello',
         file_id: null,
         message_age_cutoff: 3600,
+        speaker: 'Alex',
       },
       {
         telegramClient: telegramClient as never,
@@ -145,12 +163,14 @@ describe('handleIncomingMessage', () => {
       {
         user_id: '1001',
         chat_id: '2002',
+        chat_type: 'private',
         message_id: '42',
         message_type: MessageType.TEXT,
         timestamp: Math.floor(Date.now() / 1000),
         text: 'hello',
         file_id: null,
         message_age_cutoff: 3600,
+        speaker: 'Alex',
       },
       {
         telegramClient: telegramClient as never,
@@ -164,4 +184,5 @@ describe('handleIncomingMessage', () => {
       'HTML'
     );
   });
+
 });

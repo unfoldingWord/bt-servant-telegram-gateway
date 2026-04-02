@@ -37,12 +37,16 @@ describe('gateway integration smoke', () => {
         {
           user_id: 'user-1',
           chat_id: 'chat-1',
+          chat_type: 'group',
           message_id: '42',
           message_type: MessageType.TEXT,
           timestamp: Math.floor(Date.now() / 1000),
           text: 'hello',
           file_id: null,
           message_age_cutoff: 3600,
+          speaker: 'Alice',
+          speaker_language_code: 'en',
+          thread_id: 'thread-1',
         },
         {
           telegramClient,
@@ -58,6 +62,11 @@ describe('gateway integration smoke', () => {
         client_id: 'telegram',
         user_id: 'user-1',
         message: 'hello',
+        chat_type: 'group',
+        chat_id: 'chat-1',
+        speaker: 'Alice',
+        thread_id: 'thread-1',
+        response_language_hint: 'en',
         org: 'org-1',
       });
 

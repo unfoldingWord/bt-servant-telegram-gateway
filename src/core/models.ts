@@ -6,12 +6,16 @@ export enum MessageType {
 export interface IncomingMessage {
   user_id: string;
   chat_id: string;
+  chat_type: 'private' | 'group' | 'supergroup' | 'channel';
   message_id: string;
   message_type: MessageType;
   timestamp: number;
   text: string;
   file_id: string | null;
   message_age_cutoff: number;
+  speaker: string;
+  speaker_language_code?: string;
+  thread_id?: string;
 }
 
 export interface TelegramUpdate {
@@ -25,6 +29,7 @@ export interface TelegramMessage {
   from?: TelegramUser;
   chat: TelegramChat;
   date: number;
+  message_thread_id?: number;
   text?: string;
   voice?: TelegramVoice;
   audio?: TelegramAudio;
@@ -108,8 +113,10 @@ export function parseTelegramUpdate(
 
   const user_id = String(from.id);
   const chat_id = String(message.chat.id);
+  const chat_type = message.chat.type;
   const message_id = String(message.message_id);
   const timestamp = message.date;
+  const speaker = buildSpeakerLabel(from);
 
   let content: TelegramMessageContent = {
     messageType: MessageType.UNKNOWN,
@@ -127,12 +134,16 @@ export function parseTelegramUpdate(
   return {
     user_id,
     chat_id,
+    chat_type,
     message_id,
     message_type: content.messageType,
     timestamp,
     text: content.text,
     file_id: content.fileId,
     message_age_cutoff: messageAgeCutoff,
+    speaker,
+    speaker_language_code: from.language_code,
+    thread_id: message.message_thread_id ? String(message.message_thread_id) : undefined,
   };
 }
 
@@ -158,4 +169,17 @@ export function isMessageTooOld(message: IncomingMessage): boolean {
 export function getMessageAge(message: IncomingMessage): number {
   const currentTime = Math.floor(Date.now() / 1000);
   return currentTime - message.timestamp;
+}
+
+function buildSpeakerLabel(user: TelegramUser): string {
+  const parts = [user.first_name, user.last_name].filter((part): part is string => Boolean(part && part.trim()));
+  if (parts.length > 0) {
+    return parts.join(' ').trim();
+  }
+
+  if (user.username && user.username.trim()) {
+    return user.username.trim();
+  }
+
+  return String(user.id);
 }
