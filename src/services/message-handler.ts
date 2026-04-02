@@ -77,6 +77,50 @@ export async function handleIncomingMessage(
     }
   }
 
+  if (isStartCommand(message.text)) {
+    await telegramClient.sendTextMessage(message.chat_id, buildStartMessage(message));
+    return { handled: true, sentChunks: 1 };
+  }
+
+  if (isHelpCommand(message.text)) {
+    await telegramClient.sendTextMessage(message.chat_id, buildHelpMessage());
+    return { handled: true, sentChunks: 1 };
+  }
+
+  const languageCommand = parseLanguageCommand(message.text);
+  if (languageCommand) {
+    const { languageCode } = languageCommand;
+    if (!languageCode) {
+      await telegramClient.sendTextMessage(message.chat_id, 'Usage: /language <code>, for example /language en');
+      return { handled: true, sentChunks: 1 };
+    }
+
+    try {
+      await engineClient.updateUserPreferences(message.user_id, {
+        response_language: languageCode,
+      });
+
+      await telegramClient.sendTextMessage(
+        message.chat_id,
+        `Language preference updated to ${languageCode}.`
+      );
+      return { handled: true, sentChunks: 1 };
+    } catch (error) {
+      console.error('Language update failed', {
+        userId: message.user_id,
+        chatId: message.chat_id,
+        languageCode,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+
+      await telegramClient.sendTextMessage(
+        message.chat_id,
+        'Sorry, I could not update the language preference.'
+      );
+      return { handled: false, reason: 'engine_error' };
+    }
+  }
+
   const typingSent = await telegramClient.sendChatAction(message.chat_id, 'typing');
   console.info('Typing indicator sent', {
     chatId: message.chat_id,
@@ -161,4 +205,44 @@ function normalizeChatType(chatType: IncomingMessage['chat_type']): 'private' | 
 
 function isResetCommand(text: string): boolean {
   return /^\/reset(?:@\w+)?(?:\s|$)/iu.test(text.trim());
+}
+
+function isStartCommand(text: string): boolean {
+  return /^\/start(?:@\w+)?(?:\s|$)/iu.test(text.trim());
+}
+
+function isHelpCommand(text: string): boolean {
+  return /^\/help(?:@\w+)?(?:\s|$)/iu.test(text.trim());
+}
+
+function parseLanguageCommand(text: string): { languageCode: string | null } | null {
+  const match = /^\/(?:language|set_language)(?:@\w+)?(?:\s+([a-z]{2}))?(?:\s|$)/iu.exec(text.trim());
+  if (!match) {
+    return null;
+  }
+
+  return {
+    languageCode: match[1]?.toLowerCase() ?? null,
+  };
+}
+
+function buildStartMessage(message: IncomingMessage): string {
+  const intro = 'Welcome! I can help with Bible translation and study.';
+
+  if (message.chat_type === 'private') {
+    return `${intro}\n\nSend me a passage or ask a question.`;
+  }
+
+  return `${intro}\n\nI am ready to help in this chat.`;
+}
+
+function buildHelpMessage(): string {
+  return [
+    'Here is what I can do:',
+    '- Explain a passage',
+    '- Help with translation questions',
+    '- Continue the current conversation',
+    '- Reset the current conversation with /reset',
+    '- Change the response language with /language <code>',
+  ].join('\n');
 }
