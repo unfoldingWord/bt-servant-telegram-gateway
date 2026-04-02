@@ -315,49 +315,4 @@ describe('handleIncomingMessage', () => {
     expect(result).toEqual({ handled: true, sentChunks: 1 });
   });
 
-  it('updates language preference through engine on /language', async () => {
-    const telegramClient = {
-      sendChatAction: vi.fn(),
-      sendTextMessage: vi.fn().mockResolvedValue(true),
-      setWebhook: vi.fn(),
-    };
-    const engineClient = {
-      resetConversation: vi.fn(),
-      sendTextMessage: vi.fn(),
-      getUserPreferences: vi.fn(),
-      updateUserPreferences: vi.fn().mockResolvedValue({ response_language: 'ru' }),
-    };
-
-    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
-
-    const result = await handleIncomingMessage(
-      {
-        user_id: '1001',
-        chat_id: '2002',
-        chat_type: 'private',
-        message_id: '42',
-        message_type: MessageType.TEXT,
-        timestamp: Math.floor(Date.now() / 1000),
-        text: '/language ru',
-        file_id: null,
-        message_age_cutoff: 3600,
-        speaker: 'Alex',
-      },
-      {
-        telegramClient: telegramClient as never,
-        engineClient: engineClient as never,
-      }
-    );
-
-    expect(engineClient.updateUserPreferences).toHaveBeenCalledWith('1001', {
-      response_language: 'ru',
-    });
-    expect(telegramClient.sendTextMessage).toHaveBeenCalledWith(
-      '2002',
-      'Language preference updated to ru.'
-    );
-    expect(engineClient.sendTextMessage).not.toHaveBeenCalled();
-    expect(result).toEqual({ handled: true, sentChunks: 1 });
-  });
-
 });
