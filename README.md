@@ -8,17 +8,25 @@ Telegram Bot API webhook -> Netlify Function -> `handleIncomingMessage()` -> Eng
 
 Progress updates from engine are delivered through a separate Netlify Function and forwarded back to Telegram.
 
+The gateway supports:
+
+- private chats
+- groups and supergroups
+- `/reset` for clearing conversation history
+- Markdown-like formatting rendered as Telegram HTML
+
 ### End-to-end flow
 
 1. Telegram sends an update to `/api/telegram-webhook`.
 2. The webhook validates `WEBHOOK_SECRET_TOKEN` when it is configured.
 3. The webhook parses the update and passes text messages to `handleIncomingMessage()`.
 4. `handleIncomingMessage()` sends a `typing` action, calls `engine-client`, and waits for the engine response.
-5. `engine-client` calls `/api/v1/chat` with `client_id: "telegram"`, `Authorization: Bearer ENGINE_API_KEY`, `message_key`, optional `org`, and progress settings.
+5. `engine-client` calls `/api/v1/chat` with `client_id: "telegram"`, `Authorization: Bearer ENGINE_API_KEY`, `message_key`, optional `org`, chat context metadata, and progress settings.
 6. Long engine replies are split into chunks of up to 4000 characters before they are sent back to Telegram.
 7. The engine can send progress payloads to `/api/progress-callback`.
 8. The progress handler validates `X-Engine-Token` against `ENGINE_API_KEY` and forwards the update to Telegram.
 9. Unsupported message types are ignored or returned as unsupported; they never reach the engine flow.
+10. `/reset` is translated into the appropriate engine history reset endpoint for private chats, groups, and supergroups.
 
 ## Requirements
 
@@ -46,6 +54,26 @@ Optional:
 - `LOG_LEVEL`
 
 Use [`.env.example`](/home/user/ADV/SD/GC/bt-servant-telegram-gateway/.env.example) as the local template.
+
+## Group and supergroup support
+
+Telegram updates include chat context metadata and are forwarded to the engine:
+
+- `chat_type`
+- `chat_id`
+- `speaker`
+- `thread_id` for supergroup topics
+- `response_language_hint` from the sender's Telegram language code
+
+Routing rules:
+
+- `private` chats map to a per-user conversation
+- `group` chats map to a per-chat conversation
+- `supergroup` chats map to a per-chat or per-thread conversation when a topic is present
+
+`/reset` clears the current conversation context using the matching engine admin endpoint.
+
+The engine now owns chat-level history and preferences. The gateway remains stateless.
 
 ## Local development
 
@@ -119,6 +147,8 @@ Set these values in the Netlify dashboard or via CLI before production rollout:
 - `MESSAGE_AGE_CUTOFF_IN_SECONDS`
 - `LOG_LEVEL`
 
+For live deployment, the engine should be available at the current production backend URL and should support the group chat contract introduced in `bt-servant-engine v2.12.0`.
+
 ### Deploy and webhook checklist
 
 1. Deploy to your staging branch or production branch in Netlify.
@@ -189,3 +219,27 @@ What it checks:
 - the live gateway sends a message back through the live Telegram API
 
 If the live env vars are missing, the smoke test is skipped automatically.
+
+## Engine contract notes
+
+The gateway expects the engine to support:
+
+- `POST /api/v1/chat`
+  - `chat_type`
+  - `chat_id`
+  - `speaker`
+  - `thread_id`
+  - `response_language_hint`
+- `DELETE /api/v1/orgs/:org/users/:userId/history` for private resets
+- `DELETE /api/v1/admin/orgs/:org/groups/:chatId/history` for group resets
+- `DELETE /api/v1/admin/orgs/:org/groups/:chatId/threads/:threadId/history` for thread resets
+
+The engine response can be read from multiple fields. The gateway currently prefers:
+
+- `responses`
+- `response`
+- `message`
+- `text`
+- `reply`
+- `output`
+- `result`
