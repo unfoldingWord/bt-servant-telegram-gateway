@@ -222,39 +222,66 @@ export class EngineClient {
     return `/api/v1/admin/orgs/${org}/groups/${chatId}/history`;
   }
 
-  private mapChatResponse(data: EngineChatApiResponse, messageKey: string): ChatResponse {
+  private mapChatResponse(data: unknown, messageKey: string): ChatResponse {
     const message = this.extractMessage(data);
+
+    if (Array.isArray(data)) {
+      return {
+        message,
+        message_key: messageKey,
+        raw_response: data,
+      };
+    }
+
+    if (!data || typeof data !== 'object') {
+      return {
+        message,
+        message_key: messageKey,
+        raw_response: data,
+      };
+    }
+
+    const responseData = data as EngineChatApiResponse;
     return {
       message,
-      message_key: String(data.message_key ?? messageKey),
-      ...data,
+      message_key: String(responseData.message_key ?? messageKey),
+      ...responseData,
     };
   }
 
-  private extractMessage(data: EngineChatApiResponse | undefined): string {
+  private extractMessage(data: unknown): string {
     if (!data) {
       return '';
     }
 
-    const responseText = this.extractResponsesText(data.responses);
+    if (Array.isArray(data)) {
+      return this.extractResponsesText(data);
+    }
+
+    if (typeof data !== 'object') {
+      return typeof data === 'string' ? data.trim() : '';
+    }
+
+    const responseData = data as EngineChatApiResponse;
+    const responseText = this.extractResponsesText(responseData.responses);
     if (responseText) {
       return responseText;
     }
 
     const directMessage =
-      data.response ??
-      data.message ??
-      data.text ??
-      data.reply ??
-      data.output ??
-      data.result;
+      responseData.response ??
+      responseData.message ??
+      responseData.text ??
+      responseData.reply ??
+      responseData.output ??
+      responseData.result;
 
     if (typeof directMessage === 'string' && directMessage.trim()) {
       return directMessage;
     }
 
-    if (data.data && typeof data.data === 'object') {
-      return this.extractMessage(data.data);
+    if (responseData.data && typeof responseData.data === 'object') {
+      return this.extractMessage(responseData.data);
     }
 
     return '';

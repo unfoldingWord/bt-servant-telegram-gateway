@@ -144,6 +144,27 @@ describe('EngineClient', () => {
     });
   });
 
+  it('extracts text from top-level array responses', async () => {
+    create.mockReturnValue({ post, get, put });
+    post.mockResolvedValue({
+      data: [
+        { text: 'first part' },
+        { message: 'second part' },
+      ],
+    });
+
+    const { EngineClient } = await import('../../src/services/engine-client.js');
+    const client = new EngineClient('https://engine.example.com', 'engine-key');
+
+    await expect(client.sendTextMessage('user-1', 'hello')).resolves.toMatchObject({
+      message: 'first part\nsecond part',
+      raw_response: [
+        { text: 'first part' },
+        { message: 'second part' },
+      ],
+    });
+  });
+
   it('retries on concurrent request rejection using retry_after_ms', async () => {
     create.mockReturnValue({ post, get, put });
     post

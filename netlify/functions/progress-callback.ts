@@ -20,6 +20,10 @@ export const handler: Handler = async (event) => {
       return { statusCode: 400, body: 'Bad Request' };
     }
 
+    if (payload.type && payload.type !== 'complete') {
+      return { statusCode: 200, body: JSON.stringify({ ok: true, skipped: payload.type, message_key: payload.message_key }) };
+    }
+
     const telegramClient = new TelegramClient();
     const sent = await telegramClient.sendTextMessage(payload.chat_id, payload.text);
     if (!sent) {

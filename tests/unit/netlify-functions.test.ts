@@ -66,9 +66,29 @@ describe('netlify functions', () => {
     expect(response.statusCode).toBe(401);
   });
 
-  it('accepts progress callbacks and relays text to telegram', async () => {
+  it('skips intermediate progress callbacks', async () => {
     sendTextMessage.mockResolvedValue(true);
 
+    const { handler } = await import('../../netlify/functions/progress-callback.js');
+
+    const response = (await handler({
+      httpMethod: 'POST',
+      headers: {
+        'x-engine-token': 'engine-key',
+      },
+      body: JSON.stringify({
+        type: 'progress',
+        message_key: 'telegram:abc',
+        chat_id: '2002',
+        text: 'progress update',
+      }),
+    } as never, {} as never)) as { statusCode: number; body: string };
+
+    expect(response.statusCode).toBe(400);
+    expect(sendTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects progress payloads without complete type', async () => {
     const { handler } = await import('../../netlify/functions/progress-callback.js');
 
     const response = (await handler({
@@ -83,8 +103,32 @@ describe('netlify functions', () => {
       }),
     } as never, {} as never)) as { statusCode: number };
 
+    expect(response.statusCode).toBe(400);
+    expect(sendTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('extracts complete progress callback responses', async () => {
+    sendTextMessage.mockResolvedValue(true);
+
+    const { handler } = await import('../../netlify/functions/progress-callback.js');
+
+    const response = (await handler({
+      httpMethod: 'POST',
+      headers: {
+        'x-engine-token': 'engine-key',
+      },
+      body: JSON.stringify({
+        type: 'complete',
+        message_key: 'telegram:abc',
+        chat_id: '2002',
+        response: {
+          responses: ['final response'],
+        },
+      }),
+    } as never, {} as never)) as { statusCode: number };
+
     expect(response.statusCode).toBe(200);
-    expect(sendTextMessage).toHaveBeenCalledWith('2002', 'progress update');
+    expect(sendTextMessage).toHaveBeenCalledWith('2002', 'final response');
   });
 
   it('rejects health on non-get and accepts get', async () => {
