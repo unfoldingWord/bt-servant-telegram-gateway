@@ -6,7 +6,7 @@ Telegram gateway for `bt-servant-engine`, built with TypeScript and deployed as 
 
 Telegram Bot API webhook -> Netlify Function -> `handleIncomingMessage()` -> Engine API -> Telegram reply.
 
-Progress updates from engine are delivered through a separate Netlify Function and forwarded back to Telegram.
+Telegram gateway treats the engine as a final-only reply source. Intermediate progress/status events are not delivered to the user chat.
 
 The gateway supports:
 
@@ -21,12 +21,10 @@ The gateway supports:
 2. The webhook validates `WEBHOOK_SECRET_TOKEN` when it is configured.
 3. The webhook parses the update and passes text messages to `handleIncomingMessage()`.
 4. `handleIncomingMessage()` sends a `typing` action, calls `engine-client`, and waits for the engine response.
-5. `engine-client` calls `/api/v1/chat` with `client_id: "telegram"`, `Authorization: Bearer ENGINE_API_KEY`, `message_key`, optional `org`, chat context metadata, and progress settings.
+5. `engine-client` calls `/api/v1/chat` with `client_id: "telegram"`, `Authorization: Bearer ENGINE_API_KEY`, `message_key`, optional `org`, and chat context metadata.
 6. Long engine replies are split into chunks of up to 4000 characters before they are sent back to Telegram.
-7. The engine can send progress payloads to `/api/progress-callback`.
-8. The progress handler validates `X-Engine-Token` against `ENGINE_API_KEY` and forwards the update to Telegram.
-9. Unsupported message types are ignored or returned as unsupported; they never reach the engine flow.
-10. `/reset` is translated into the appropriate engine history reset endpoint for private chats, groups, and supergroups.
+7. Unsupported message types are ignored or returned as unsupported; they never reach the engine flow.
+8. `/reset` is translated into the appropriate engine history reset endpoint for private chats, groups, and supergroups.
 
 ## Requirements
 
@@ -142,7 +140,7 @@ Set these values in the Netlify dashboard or via CLI before production rollout:
 - `ENGINE_API_KEY`
 - `WEBHOOK_SECRET_TOKEN` if webhook secret validation is enabled
 - `ENGINE_ORG` if the deployment should target a specific org
-- `GATEWAY_PUBLIC_URL` for progress callbacks
+- `GATEWAY_PUBLIC_URL` for live smoke tests and webhook reachability
 - `PROGRESS_THROTTLE_SECONDS`
 - `MESSAGE_AGE_CUTOFF_IN_SECONDS`
 - `LOG_LEVEL`
@@ -167,9 +165,9 @@ curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" 
 4. If `WEBHOOK_SECRET_TOKEN` is not used, omit the `secret_token` field.
 5. Verify:
    - text messages are answered
-   - progress updates arrive
+   - only the final reply is shown in Telegram
    - unsupported message types are ignored or rejected consistently
-6. Inspect Netlify logs for webhook, progress, and engine errors after the first live request.
+6. Inspect Netlify logs for webhook and engine errors after the first live request.
 
 ## Troubleshooting
 
@@ -183,8 +181,8 @@ curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" 
   - Confirm `ENGINE_BASE_URL`, `ENGINE_API_KEY`, and optional `ENGINE_ORG`.
   - Inspect the engine logs for `429` or auth failures.
 - Progress callbacks:
-  - Ensure `GATEWAY_PUBLIC_URL` is set correctly.
-  - Make sure the engine sends `X-Engine-Token` matching `ENGINE_API_KEY`.
+  - If you re-enable callback transport in the engine, ensure `GATEWAY_PUBLIC_URL` is set correctly.
+  - Make sure any callback auth matches `ENGINE_API_KEY`.
 
 ## Useful commands
 
@@ -230,6 +228,7 @@ The gateway expects the engine to support:
   - `speaker`
   - `thread_id`
   - `response_language_hint`
+- final-only JSON replies for Telegram
 - `DELETE /api/v1/orgs/:org/users/:userId/history` for private resets
 - `DELETE /api/v1/admin/orgs/:org/groups/:chatId/history` for group resets
 - `DELETE /api/v1/admin/orgs/:org/groups/:chatId/threads/:threadId/history` for thread resets
@@ -243,3 +242,5 @@ The engine response can be read from multiple fields. The gateway currently pref
 - `reply`
 - `output`
 - `result`
+
+The gateway intentionally ignores intermediate progress/status chunks for Telegram and only renders the final reply text.

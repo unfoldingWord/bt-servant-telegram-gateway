@@ -1,5 +1,6 @@
 import { isMessageTooOld, isSupportedMessageType, type IncomingMessage } from '../core/models.js';
 import { EngineClient } from './engine-client.js';
+import { EngineGateway } from './engine-adapter.js';
 import { chunkMessage } from './chunking.js';
 import { formatTelegramHtml } from './telegram-format.js';
 import { TelegramClient } from '../telegram/client.js';
@@ -7,6 +8,7 @@ import { TelegramClient } from '../telegram/client.js';
 export interface MessageHandlerDependencies {
   telegramClient?: TelegramClient;
   engineClient?: EngineClient;
+  engineGateway?: EngineGateway;
   progressThrottleSeconds?: number;
   fallbackMessage?: string;
 }
@@ -25,6 +27,7 @@ export async function handleIncomingMessage(
 ): Promise<MessageHandlerResult> {
   const telegramClient = dependencies.telegramClient ?? new TelegramClient();
   const engineClient = dependencies.engineClient ?? new EngineClient();
+  const engineGateway = dependencies.engineGateway ?? new EngineGateway(engineClient);
   const fallbackMessage = dependencies.fallbackMessage ?? DEFAULT_FALLBACK_MESSAGE;
 
   console.info('Handling incoming message', {
@@ -50,11 +53,12 @@ export async function handleIncomingMessage(
 
   if (isResetCommand(message.text)) {
     try {
-      await engineClient.resetConversation(message.user_id, {
-        chatType: normalizeChatType(message.chat_type),
-        chatId: message.chat_id,
-        threadId: message.thread_id,
-      });
+      await engineGateway.resetConversation(
+        message.user_id,
+        normalizeChatType(message.chat_type),
+        message.chat_id,
+        message.thread_id
+      );
 
       console.info('Conversation reset', {
         userId: message.user_id,
@@ -94,19 +98,18 @@ export async function handleIncomingMessage(
   });
 
   try {
-    const response = await engineClient.sendTextMessage(
-      message.user_id,
-      message.text,
-      {
+    const response = await engineGateway.requestFinalReply({
+      userId: message.user_id,
+      message: message.text,
+      context: {
         chatType: normalizeChatType(message.chat_type),
         chatId: message.chat_id,
         speaker: message.speaker,
         threadId: message.thread_id,
         responseLanguageHint: message.speaker_language_code,
       },
-      undefined,
-      dependencies.progressThrottleSeconds
-    );
+      progressThrottleSeconds: dependencies.progressThrottleSeconds,
+    });
 
     console.info('Engine response text', {
       userId: message.user_id,
