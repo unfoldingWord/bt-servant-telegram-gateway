@@ -11,6 +11,12 @@ describe('chunkMessage', () => {
     expect(chunkMessage('Hello world. How are you?')).toEqual(['Hello world. How are you?']);
   });
 
+  it('preserves paragraph separation for structured text', () => {
+    expect(chunkMessage('Intro\n\nSection one\n\nSection two')).toEqual([
+      'Intro\n\nSection one\n\nSection two',
+    ]);
+  });
+
   it('splits long text into bounded chunks', () => {
     const text = Array.from({ length: 200 }, (_, index) => `Sentence ${index + 1}.`).join(' ');
 

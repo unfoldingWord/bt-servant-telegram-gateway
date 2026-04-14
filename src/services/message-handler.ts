@@ -1,6 +1,7 @@
 import { isMessageTooOld, isSupportedMessageType, type IncomingMessage } from '../core/models.js';
 import { EngineClient } from './engine-client.js';
 import { EngineGateway } from './engine-adapter.js';
+import { formatEngineResponse } from './engine-response-format.js';
 import { chunkMessage } from './chunking.js';
 import { formatTelegramHtml } from './telegram-format.js';
 import { TelegramClient } from '../telegram/client.js';
@@ -117,7 +118,8 @@ export async function handleIncomingMessage(
       text: previewText(response.message),
     });
 
-    const chunks = chunkMessage(response.message);
+    const formattedResponse = formatEngineResponse(response.message);
+    const chunks = chunkMessage(formattedResponse);
     let sentChunks = 0;
 
     for (const chunk of chunks) {
