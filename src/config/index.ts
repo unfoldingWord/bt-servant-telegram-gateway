@@ -13,6 +13,7 @@ interface Config {
   engineTimeoutMs: number;
 
   gatewayPublicUrl: string;
+  telegramTimeoutMs: number;
   progressThrottleSeconds: number;
 
   messageAgeCutoffInSeconds: number;
@@ -52,6 +53,7 @@ export const config: Config = {
   engineBaseUrl: getEnvVar('ENGINE_BASE_URL'),
   engineApiKey: getEnvVar('ENGINE_API_KEY'),
   gatewayPublicUrl: getEnvVar('GATEWAY_PUBLIC_URL', ''),
+  telegramTimeoutMs: getEnvNumber('TELEGRAM_TIMEOUT_MS', 15000),
   engineTimeoutMs: getEnvNumber('ENGINE_TIMEOUT_MS', 45000),
   progressThrottleSeconds: getEnvNumber('PROGRESS_THROTTLE_SECONDS', 3.0),
   messageAgeCutoffInSeconds: getEnvNumber('MESSAGE_AGE_CUTOFF_IN_SECONDS', 3600),

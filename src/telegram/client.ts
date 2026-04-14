@@ -26,7 +26,7 @@ export class TelegramClient {
   constructor(botToken: string = config.telegramBotToken, baseUrl: string = `https://api.telegram.org/bot${botToken}`) {
     this.http = axios.create({
       baseURL: baseUrl,
-      timeout: 10000,
+      timeout: config.telegramTimeoutMs,
     });
   }
 

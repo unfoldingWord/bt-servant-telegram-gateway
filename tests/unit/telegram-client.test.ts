@@ -4,6 +4,7 @@ process.env.TELEGRAM_BOT_TOKEN = 'telegram-token';
 process.env.ENGINE_BASE_URL = 'https://engine.example.com';
 process.env.ENGINE_API_KEY = 'engine-key';
 process.env.GATEWAY_PUBLIC_URL = 'https://gateway.example.com';
+process.env.TELEGRAM_TIMEOUT_MS = '15000';
 
 const post = vi.fn();
 const create = vi.fn();
