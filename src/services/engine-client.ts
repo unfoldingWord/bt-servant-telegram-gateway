@@ -102,6 +102,7 @@ export class EngineClient {
     progressCallbackUrlOrThrottleSeconds?: string | number,
     progressThrottleSeconds: number = config.progressThrottleSeconds
   ): Promise<ChatResponse> {
+    const startedAt = Date.now();
     const context = typeof contextOrProgressCallbackUrl === 'string' || contextOrProgressCallbackUrl === undefined
       ? {}
       : contextOrProgressCallbackUrl;
@@ -121,21 +122,46 @@ export class EngineClient {
       ...(this.org ? { org: this.org } : {}),
     };
 
+    console.info('Engine sendTextMessage start', {
+      userId,
+      chatType: context.chatType ?? 'private',
+      chatId: context.chatId,
+      threadId: context.threadId,
+      speaker: context.speaker,
+      responseLanguageHint: context.responseLanguageHint,
+      org: this.org,
+      messageLength: message.length,
+      messagePreview: previewText(message),
+      timeoutMs: config.engineTimeoutMs,
+      requestKeys: Object.keys(payload),
+    });
+
     try {
       const response = await this.http.post<EngineChatApiResponse>('/api/v1/chat', payload);
       console.info('Engine chat response received', {
         userId,
+        durationMs: Date.now() - startedAt,
         keys: Object.keys(response.data ?? {}),
+        responseKeys: summarizeResponseKeys(response.data),
       });
       return this.mapChatResponse(response.data);
     } catch (error) {
       const retryDelay = this.getRetryDelayMs(error);
       if (retryDelay !== null) {
+        console.info('Engine sendTextMessage retry scheduled', {
+          userId,
+          retryDelayMs: retryDelay,
+          durationMs: Date.now() - startedAt,
+          timeoutMs: config.engineTimeoutMs,
+          messagePreview: previewText(message),
+        });
         await this.sleep(retryDelay);
         const response = await this.http.post<EngineChatApiResponse>('/api/v1/chat', payload);
         console.info('Engine chat response received after retry', {
           userId,
+          durationMs: Date.now() - startedAt,
           keys: Object.keys(response.data ?? {}),
+          responseKeys: summarizeResponseKeys(response.data),
         });
         return this.mapChatResponse(response.data);
       }
@@ -147,11 +173,30 @@ export class EngineClient {
 
   async getUserPreferences(userId: string): Promise<UserPreferences> {
     const path = this.preferencesPath(userId);
+    const startedAt = Date.now();
+    console.info('Engine getUserPreferences start', {
+      userId,
+      path,
+      org: this.org,
+      timeoutMs: config.engineTimeoutMs,
+    });
     try {
       const response = await this.http.get<EnginePreferencesApiResponse>(path);
+      console.info('Engine getUserPreferences success', {
+        userId,
+        path,
+        durationMs: Date.now() - startedAt,
+        responseKeys: Object.keys(response.data ?? {}),
+        preferenceKeys: summarizeResponseKeys(response.data),
+      });
       return this.mapPreferencesResponse(response.data);
     } catch (error) {
       if (this.isNotFound(error)) {
+        console.info('Engine getUserPreferences not found', {
+          userId,
+          path,
+          durationMs: Date.now() - startedAt,
+        });
         return {};
       }
 
@@ -162,10 +207,25 @@ export class EngineClient {
 
   async updateUserPreferences(userId: string, preferences: UserPreferences): Promise<UserPreferences> {
     const path = this.preferencesPath(userId);
+    const startedAt = Date.now();
+    console.info('Engine updateUserPreferences start', {
+      userId,
+      path,
+      org: this.org,
+      timeoutMs: config.engineTimeoutMs,
+      preferenceKeys: Object.keys(preferences ?? {}),
+    });
     try {
       const response = await this.http.put<EnginePreferencesApiResponse>(path, {
         preferences,
         ...(this.org ? { org: this.org } : {}),
+      });
+      console.info('Engine updateUserPreferences success', {
+        userId,
+        path,
+        durationMs: Date.now() - startedAt,
+        responseKeys: Object.keys(response.data ?? {}),
+        preferenceKeys: summarizeResponseKeys(response.data),
       });
       return this.mapPreferencesResponse(response.data);
     } catch (error) {
@@ -176,11 +236,27 @@ export class EngineClient {
 
   async resetConversation(userId: string, options: ResetConversationOptions): Promise<void> {
     const path = this.resetPath(userId, options);
+    const startedAt = Date.now();
+    console.info('Engine resetConversation start', {
+      userId,
+      path,
+      org: this.org,
+      chatType: options.chatType,
+      chatId: options.chatId,
+      threadId: options.threadId,
+      timeoutMs: config.engineTimeoutMs,
+    });
     try {
-      await this.http.delete(path, {
+      const response = await this.http.delete(path, {
         data: {
           ...(this.org ? { org: this.org } : {}),
         },
+      });
+      console.info('Engine resetConversation success', {
+        userId,
+        path,
+        durationMs: Date.now() - startedAt,
+        responseKeys: summarizeResponseKeys(response.data),
       });
     } catch (error) {
       this.logHttpError({ operation: 'resetConversation', path, userId }, error);
@@ -365,8 +441,11 @@ export class EngineClient {
         path: context.path,
         userId: context.userId,
         status: axiosError.response?.status,
-        data: axiosError.response?.data,
+        data: summarizeResponseData(axiosError.response?.data),
         message: axiosError.message,
+        code: axiosError.code,
+        timeoutMs: axiosError.config?.timeout,
+        url: axiosError.config?.url,
       });
       return;
     }
@@ -381,4 +460,45 @@ export class EngineClient {
   private async sleep(ms: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms));
   }
+}
+
+function previewText(text: string, maxLength = 120): string {
+  const normalized = text.replace(/\s+/gu, ' ').trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function summarizeResponseKeys(data: unknown): string[] {
+  if (!data || typeof data !== 'object') {
+    return [];
+  }
+
+  if (Array.isArray(data)) {
+    return data.length > 0 && data[0] && typeof data[0] === 'object'
+      ? Object.keys(data[0] as Record<string, unknown>)
+      : [];
+  }
+
+  return Object.keys(data as Record<string, unknown>);
+}
+
+function summarizeResponseData(data: unknown): unknown {
+  if (!data || typeof data !== 'object') {
+    return data;
+  }
+
+  if (Array.isArray(data)) {
+    return {
+      type: 'array',
+      length: data.length,
+      firstKeys: data[0] && typeof data[0] === 'object' ? Object.keys(data[0] as Record<string, unknown>) : [],
+    };
+  }
+
+  return {
+    keys: Object.keys(data as Record<string, unknown>),
+  };
 }

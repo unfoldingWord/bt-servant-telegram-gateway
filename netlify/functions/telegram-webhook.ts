@@ -26,9 +26,19 @@ export const handler: Handler = (event) => {
   }
 
   try {
+    const body = event.body || '';
+    console.info('Telegram webhook request received', {
+      method: event.httpMethod,
+      contentType: headers['content-type'] ?? '',
+      bodyLength: body.length,
+      bodyPreview: previewText(body),
+      hasSecretHeader: Boolean(headers['x-telegram-bot-api-secret-token']),
+    });
+
     const update = JSON.parse(event.body || '{}') as Parameters<typeof parseTelegramUpdate>[0];
     console.info('Telegram webhook update received', {
       updateId: update.update_id,
+      updateType: summarizeUpdateType(update),
       keys: Object.keys(update),
       messageKeys: update.message ? Object.keys(update.message) : [],
       editedMessageKeys: update.edited_message ? Object.keys(update.edited_message) : [],
@@ -70,3 +80,34 @@ export const handler: Handler = (event) => {
     return Promise.resolve({ statusCode: 400, body: 'Bad Request' });
   }
 };
+
+function summarizeUpdateType(update: Parameters<typeof parseTelegramUpdate>[0]): string {
+  const knownTypes = [
+    'message',
+    'edited_message',
+    'channel_post',
+    'edited_channel_post',
+    'inline_query',
+    'chosen_inline_result',
+    'callback_query',
+    'shipping_query',
+    'pre_checkout_query',
+    'poll',
+    'poll_answer',
+    'my_chat_member',
+    'chat_member',
+    'chat_join_request',
+  ] as const;
+
+  const activeTypes = knownTypes.filter((type) => Object.prototype.hasOwnProperty.call(update, type));
+  return activeTypes.length > 0 ? activeTypes.join(',') : 'unknown';
+}
+
+function previewText(text: string, maxLength = 160): string {
+  const normalized = text.replace(/\s+/gu, ' ').trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
