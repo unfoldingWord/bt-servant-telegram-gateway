@@ -55,6 +55,7 @@ Optional:
 - `WEBHOOK_SECRET_TOKEN`
 - `ENGINE_ORG`
 - `ENGINE_TIMEOUT_MS`
+- `TELEGRAM_TIMEOUT_MS`
 - `GATEWAY_PUBLIC_URL`
 - `PROGRESS_THROTTLE_SECONDS`
 - `MESSAGE_AGE_CUTOFF_IN_SECONDS`
@@ -217,6 +218,7 @@ Set these environment variables before running it:
 - `LIVE_E2E_CHAT_ID` - numeric Telegram chat ID that the bot can message
 - `WEBHOOK_SECRET_TOKEN` - optional, included when your webhook is protected
 - `ENGINE_TIMEOUT_MS` - optional timeout cap for engine requests in milliseconds
+- `TELEGRAM_TIMEOUT_MS` - optional timeout cap for Telegram API requests in milliseconds
 
 Run it with:
 
@@ -242,7 +244,7 @@ The gateway expects the engine to support:
   - `chat_type`
   - `chat_id`
   - `speaker`
-- `thread_id`
+  - `thread_id`
   - `response_language_hint`
 - `ENGINE_TIMEOUT_MS` to cap how long the gateway waits for engine replies
 - final-only JSON replies for Telegram
