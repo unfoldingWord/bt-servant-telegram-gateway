@@ -15,6 +15,14 @@ The gateway supports:
 - `/reset` for clearing conversation history
 - Markdown-like formatting rendered as Telegram HTML
 
+In groups and supergroups, the bot responds when you:
+
+- mention the bot by username, for example `@bt24_test_bot ...`
+- reply to one of the bot's messages
+- use supported slash commands such as `/help`, `/start`, and `/reset`
+
+If the bot is used in a topic thread, replies stay in the same topic by reusing Telegram's `message_thread_id`.
+
 ### End-to-end flow
 
 1. Telegram sends an update to `/api/telegram-webhook`.
@@ -113,6 +121,8 @@ For Telegram webhook registration, point Telegram to:
 
 If `WEBHOOK_SECRET_TOKEN` is set, Telegram requests must include the matching `X-Telegram-Bot-Api-Secret-Token` header.
 
+To enable group mentions, set `TELEGRAM_BOT_USERNAME` in `.env` to the bot username without the leading `@`.
+
 To recover or rotate the webhook:
 
 1. Update the Telegram webhook URL with the new Netlify site URL, if needed.
@@ -138,6 +148,7 @@ Set these values in the Netlify dashboard or via CLI before production rollout:
 - `TELEGRAM_BOT_TOKEN`
 - `ENGINE_BASE_URL`
 - `ENGINE_API_KEY`
+- `TELEGRAM_BOT_USERNAME` for mention detection in group chats
 - `WEBHOOK_SECRET_TOKEN` if webhook secret validation is enabled
 - `ENGINE_ORG` if the deployment should target a specific org
 - `GATEWAY_PUBLIC_URL` for live smoke tests and webhook reachability
