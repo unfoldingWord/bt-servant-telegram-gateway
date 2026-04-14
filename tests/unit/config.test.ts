@@ -35,6 +35,7 @@ describe('config', () => {
     vi.stubEnv('GATEWAY_PUBLIC_URL', 'https://gateway.example.com');
     vi.stubEnv('PROGRESS_THROTTLE_SECONDS', '5');
     vi.stubEnv('MESSAGE_AGE_CUTOFF_IN_SECONDS', '600');
+    vi.stubEnv('ENGINE_TIMEOUT_MS', '30000');
     vi.stubEnv('LOG_LEVEL', 'DEBUG');
     vi.stubEnv('WEBHOOK_SECRET_TOKEN', 'secret');
     vi.stubEnv('ENGINE_ORG', 'org-123');
@@ -48,6 +49,7 @@ describe('config', () => {
       engineApiKey: 'engine-key',
       engineOrg: 'org-123',
       gatewayPublicUrl: 'https://gateway.example.com',
+      engineTimeoutMs: 30000,
       progressThrottleSeconds: 5,
       messageAgeCutoffInSeconds: 600,
       logLevel: 'DEBUG',
@@ -61,12 +63,14 @@ describe('config', () => {
     vi.stubEnv('GATEWAY_PUBLIC_URL', 'https://gateway.example.com');
     vi.stubEnv('PROGRESS_THROTTLE_SECONDS', '5');
     vi.stubEnv('MESSAGE_AGE_CUTOFF_IN_SECONDS', '600');
+    vi.stubEnv('ENGINE_TIMEOUT_MS', '30000');
     vi.stubEnv('LOG_LEVEL', 'DEBUG');
 
     const { config } = await loadConfig();
 
     expect(config.webhookSecretToken).toBeUndefined();
     expect(config.engineOrg).toBeUndefined();
+    expect(config.engineTimeoutMs).toBe(30000);
     expect(config.progressThrottleSeconds).toBe(5);
     expect(config.messageAgeCutoffInSeconds).toBe(600);
     expect(config.logLevel).toBe('DEBUG');

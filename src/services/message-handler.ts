@@ -109,11 +109,7 @@ export async function handleIncomingMessage(
     return { handled: true, sentChunks: 1 };
   }
 
-  const typingSent = await sendChatAction(telegramClient, message.chat_id, 'typing', message.thread_id);
-  console.info('Typing indicator sent', {
-    chatId: message.chat_id,
-    typingSent,
-  });
+  void sendTypingIndicator(telegramClient, message.chat_id, message.thread_id);
 
   try {
     const response = await engineGateway.requestFinalReply({
@@ -260,4 +256,23 @@ async function sendChatAction(
   }
 
   return telegramClient.sendChatAction(chatId, action);
+}
+
+async function sendTypingIndicator(
+  telegramClient: TelegramClient,
+  chatId: string,
+  threadId?: string
+): Promise<void> {
+  try {
+    const typingSent = await sendChatAction(telegramClient, chatId, 'typing', threadId);
+    console.info('Typing indicator sent', {
+      chatId,
+      typingSent,
+    });
+  } catch (error) {
+    console.info('Typing indicator skipped', {
+      chatId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
 }

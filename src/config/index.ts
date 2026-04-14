@@ -10,6 +10,7 @@ interface Config {
   engineBaseUrl: string;
   engineApiKey: string;
   engineOrg: string | undefined;
+  engineTimeoutMs: number;
 
   gatewayPublicUrl: string;
   progressThrottleSeconds: number;
@@ -51,6 +52,7 @@ export const config: Config = {
   engineBaseUrl: getEnvVar('ENGINE_BASE_URL'),
   engineApiKey: getEnvVar('ENGINE_API_KEY'),
   gatewayPublicUrl: getEnvVar('GATEWAY_PUBLIC_URL', ''),
+  engineTimeoutMs: getEnvNumber('ENGINE_TIMEOUT_MS', 45000),
   progressThrottleSeconds: getEnvNumber('PROGRESS_THROTTLE_SECONDS', 3.0),
   messageAgeCutoffInSeconds: getEnvNumber('MESSAGE_AGE_CUTOFF_IN_SECONDS', 3600),
   logLevel: getEnvVar('LOG_LEVEL', 'INFO'),

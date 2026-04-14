@@ -70,11 +70,12 @@ export class EngineClient {
   constructor(
     baseUrl: string = config.engineBaseUrl,
     apiKey: string = config.engineApiKey,
-    private readonly org: string | undefined = config.engineOrg
+    private readonly org: string | undefined = config.engineOrg,
+    timeoutMs: number = config.engineTimeoutMs
   ) {
     this.http = axios.create({
       baseURL: baseUrl,
-      timeout: 120000,
+      timeout: timeoutMs,
       headers: {
         Authorization: `Bearer ${apiKey}`,
       },

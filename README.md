@@ -54,6 +54,7 @@ Optional:
 
 - `WEBHOOK_SECRET_TOKEN`
 - `ENGINE_ORG`
+- `ENGINE_TIMEOUT_MS`
 - `GATEWAY_PUBLIC_URL`
 - `PROGRESS_THROTTLE_SECONDS`
 - `MESSAGE_AGE_CUTOFF_IN_SECONDS`
@@ -190,6 +191,7 @@ curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" 
   - Check Telegram API responses in the function logs.
 - Engine errors:
   - Confirm `ENGINE_BASE_URL`, `ENGINE_API_KEY`, and optional `ENGINE_ORG`.
+  - If requests are timing out, lower `ENGINE_TIMEOUT_MS` in the deployment environment.
   - Inspect the engine logs for `429` or auth failures.
 - Progress callbacks:
   - If you re-enable callback transport in the engine, ensure `GATEWAY_PUBLIC_URL` is set correctly.
@@ -214,6 +216,7 @@ Set these environment variables before running it:
 - `TELEGRAM_BOT_TOKEN` - token for the live Telegram bot
 - `LIVE_E2E_CHAT_ID` - numeric Telegram chat ID that the bot can message
 - `WEBHOOK_SECRET_TOKEN` - optional, included when your webhook is protected
+- `ENGINE_TIMEOUT_MS` - optional timeout cap for engine requests in milliseconds
 
 Run it with:
 
@@ -239,8 +242,9 @@ The gateway expects the engine to support:
   - `chat_type`
   - `chat_id`
   - `speaker`
-  - `thread_id`
+- `thread_id`
   - `response_language_hint`
+- `ENGINE_TIMEOUT_MS` to cap how long the gateway waits for engine replies
 - final-only JSON replies for Telegram
 - `DELETE /api/v1/orgs/:org/users/:userId/history` for private resets
 - `DELETE /api/v1/admin/orgs/:org/groups/:chatId/history` for group resets
