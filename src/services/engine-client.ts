@@ -19,19 +19,16 @@ export interface ResetConversationOptions {
 }
 
 export interface EngineChatRequest {
-  client_id: 'telegram';
+  client_id: 'telegram-gateway';
   user_id: string;
+  message_type: 'text';
   message: string;
-  message_key: string;
   chat_type?: 'private' | 'group' | 'supergroup';
   chat_id?: string;
   speaker?: string;
   thread_id?: string;
   response_language_hint?: string;
-  progress_mode?: 'initially_allow';
-  progress_throttle_seconds?: number;
   org?: string;
-  progress_callback_url?: string;
 }
 
 export interface EngineMessageContext {
@@ -107,42 +104,29 @@ export class EngineClient {
     const context = typeof contextOrProgressCallbackUrl === 'string' || contextOrProgressCallbackUrl === undefined
       ? {}
       : contextOrProgressCallbackUrl;
-    const progressCallbackUrl =
-      typeof contextOrProgressCallbackUrl === 'string'
-        ? contextOrProgressCallbackUrl
-        : typeof progressCallbackUrlOrThrottleSeconds === 'string'
-          ? progressCallbackUrlOrThrottleSeconds
-          : undefined;
-    const resolvedThrottleSeconds =
-      typeof progressCallbackUrlOrThrottleSeconds === 'number'
-        ? progressCallbackUrlOrThrottleSeconds
-        : progressThrottleSeconds;
+    void progressCallbackUrlOrThrottleSeconds;
+    void progressThrottleSeconds;
 
-    const messageKey = this.buildMessageKey(userId, message);
     const payload: EngineChatRequest = {
-      client_id: 'telegram',
+      client_id: 'telegram-gateway',
       user_id: userId,
+      message_type: 'text',
       message,
-      message_key: messageKey,
       ...(context.chatType ? { chat_type: context.chatType } : {}),
       ...(context.chatId ? { chat_id: context.chatId } : {}),
       ...(context.speaker ? { speaker: context.speaker } : {}),
       ...(context.threadId ? { thread_id: context.threadId } : {}),
       ...(context.responseLanguageHint ? { response_language_hint: context.responseLanguageHint } : {}),
-      progress_mode: 'initially_allow',
-      progress_throttle_seconds: resolvedThrottleSeconds,
       ...(this.org ? { org: this.org } : {}),
-      ...(progressCallbackUrl ? { progress_callback_url: progressCallbackUrl } : {}),
     };
 
     try {
       const response = await this.http.post<EngineChatApiResponse>('/api/v1/chat', payload);
       console.info('Engine chat response received', {
         userId,
-        messageKey,
         keys: Object.keys(response.data ?? {}),
       });
-      return this.mapChatResponse(response.data, messageKey);
+      return this.mapChatResponse(response.data);
     } catch (error) {
       const retryDelay = this.getRetryDelayMs(error);
       if (retryDelay !== null) {
@@ -150,10 +134,9 @@ export class EngineClient {
         const response = await this.http.post<EngineChatApiResponse>('/api/v1/chat', payload);
         console.info('Engine chat response received after retry', {
           userId,
-          messageKey,
           keys: Object.keys(response.data ?? {}),
         });
-        return this.mapChatResponse(response.data, messageKey);
+        return this.mapChatResponse(response.data);
       }
 
       this.logHttpError({ operation: 'sendTextMessage', path: '/api/v1/chat', userId }, error);
@@ -222,13 +205,12 @@ export class EngineClient {
     return `/api/v1/admin/orgs/${org}/groups/${chatId}/history`;
   }
 
-  private mapChatResponse(data: unknown, messageKey: string): ChatResponse {
+  private mapChatResponse(data: unknown): ChatResponse {
     const message = this.extractMessage(data);
 
     if (Array.isArray(data)) {
       return {
         message,
-        message_key: messageKey,
         raw_response: data,
       };
     }
@@ -236,15 +218,13 @@ export class EngineClient {
     if (!data || typeof data !== 'object') {
       return {
         message,
-        message_key: messageKey,
         raw_response: data,
       };
     }
 
     const responseData = data as EngineChatApiResponse;
     return {
-      message,
-      message_key: String(responseData.message_key ?? messageKey),
+        message,
       ...responseData,
     };
   }
@@ -340,12 +320,6 @@ export class EngineClient {
 
   private mapPreferencesResponse(data: EnginePreferencesApiResponse): UserPreferences {
     return data.prefs ?? data.preferences ?? {};
-  }
-
-  private buildMessageKey(userId: string, message: string): string {
-    const timestamp = Date.now().toString(36);
-    const hash = Buffer.from(`${userId}:${message}`).toString('base64url').slice(0, 12);
-    return `telegram:${timestamp}:${hash}`;
   }
 
   private getRetryDelayMs(error: unknown): number | null {

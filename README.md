@@ -223,6 +223,8 @@ If the live env vars are missing, the smoke test is skipped automatically.
 The gateway expects the engine to support:
 
 - `POST /api/v1/chat`
+  - `client_id: "telegram-gateway"`
+  - `message_type: "text"`
   - `chat_type`
   - `chat_id`
   - `speaker`

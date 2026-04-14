@@ -59,8 +59,9 @@ describe('gateway integration smoke', () => {
       expect(engineRequests).toHaveLength(1);
       expect(engineRequests[0]?.path).toBe('/api/v1/chat');
       expect(JSON.parse(engineRequests[0]?.body ?? '{}')).toMatchObject({
-        client_id: 'telegram',
+        client_id: 'telegram-gateway',
         user_id: 'user-1',
+        message_type: 'text',
         message: 'hello',
         chat_type: 'group',
         chat_id: 'chat-1',

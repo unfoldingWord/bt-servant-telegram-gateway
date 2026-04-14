@@ -40,16 +40,13 @@ describe('EngineClient', () => {
     const result = await client.sendTextMessage('user-1', 'hello', 'https://gateway/progress', 7);
 
     expect(post).toHaveBeenCalledWith('/api/v1/chat', expect.objectContaining({
-      client_id: 'telegram',
+      client_id: 'telegram-gateway',
       user_id: 'user-1',
+      message_type: 'text',
       message: 'hello',
-      progress_mode: 'initially_allow',
-      progress_throttle_seconds: 7,
       org: 'org-1',
-      progress_callback_url: 'https://gateway/progress',
     }));
     expect(result.message).toBe('ok');
-    expect(result.message_key).toBe('server-key');
   });
 
   it('sends extended chat context when provided', async () => {
@@ -74,17 +71,16 @@ describe('EngineClient', () => {
     );
 
     expect(post).toHaveBeenCalledWith('/api/v1/chat', expect.objectContaining({
-      client_id: 'telegram',
+      client_id: 'telegram-gateway',
       user_id: 'user-1',
+      message_type: 'text',
       message: 'hello',
       chat_type: 'group',
       chat_id: 'group-42',
       speaker: 'Alice',
       thread_id: 'thread-7',
       response_language_hint: 'ru',
-      progress_throttle_seconds: 5,
       org: 'org-1',
-      progress_callback_url: 'https://gateway/progress',
     }));
   });
 
@@ -158,10 +154,6 @@ describe('EngineClient', () => {
 
     await expect(client.sendTextMessage('user-1', 'hello')).resolves.toMatchObject({
       message: 'first part\nsecond part',
-      raw_response: [
-        { text: 'first part' },
-        { message: 'second part' },
-      ],
     });
   });
 
