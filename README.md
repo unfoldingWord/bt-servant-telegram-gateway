@@ -21,7 +21,7 @@ The gateway supports:
 2. The webhook validates `WEBHOOK_SECRET_TOKEN` when it is configured.
 3. The webhook parses the update and passes text messages to `handleIncomingMessage()`.
 4. `handleIncomingMessage()` sends a `typing` action, calls `engine-client`, and waits for the engine response.
-5. `engine-client` calls `/api/v1/chat` with `client_id: "telegram"`, `Authorization: Bearer ENGINE_API_KEY`, `message_key`, optional `org`, and chat context metadata.
+5. `engine-client` calls `/api/v1/chat` with `client_id: "telegram-gateway"`, `Authorization: Bearer ENGINE_API_KEY`, optional `org`, and chat context metadata.
 6. Long engine replies are split into chunks of up to 4000 characters before they are sent back to Telegram.
 7. Unsupported message types are ignored or returned as unsupported; they never reach the engine flow.
 8. `/reset` is translated into the appropriate engine history reset endpoint for private chats, groups, and supergroups.
