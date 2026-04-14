@@ -80,7 +80,7 @@ export async function handleIncomingMessage(
         threadId: message.thread_id,
       });
 
-      await telegramClient.sendTextMessage(message.chat_id, 'Conversation has been reset.');
+      await sendTextMessage(telegramClient, message.chat_id, 'Conversation has been reset.', message.thread_id);
       return { handled: true, reason: 'reset', sentChunks: 1 };
     } catch (error) {
       console.error('Conversation reset failed', {
@@ -89,22 +89,27 @@ export async function handleIncomingMessage(
         error: error instanceof Error ? error.message : 'Unknown error',
       });
 
-      await telegramClient.sendTextMessage(message.chat_id, 'Sorry, I could not reset the conversation.');
+      await sendTextMessage(
+        telegramClient,
+        message.chat_id,
+        'Sorry, I could not reset the conversation.',
+        message.thread_id
+      );
       return { handled: false, reason: 'engine_error' };
     }
   }
 
   if (isStartCommand(message.text)) {
-    await telegramClient.sendTextMessage(message.chat_id, buildStartMessage(message));
+    await sendTextMessage(telegramClient, message.chat_id, buildStartMessage(message), message.thread_id);
     return { handled: true, sentChunks: 1 };
   }
 
   if (isHelpCommand(message.text)) {
-    await telegramClient.sendTextMessage(message.chat_id, buildHelpMessage());
+    await sendTextMessage(telegramClient, message.chat_id, buildHelpMessage(), message.thread_id);
     return { handled: true, sentChunks: 1 };
   }
 
-  const typingSent = await telegramClient.sendChatAction(message.chat_id, 'typing');
+  const typingSent = await sendChatAction(telegramClient, message.chat_id, 'typing', message.thread_id);
   console.info('Typing indicator sent', {
     chatId: message.chat_id,
     typingSent,
@@ -143,7 +148,7 @@ export async function handleIncomingMessage(
         html: previewText(renderedChunk),
       });
 
-      const ok = await telegramClient.sendTextMessage(message.chat_id, renderedChunk, 'HTML');
+      const ok = await sendTextMessage(telegramClient, message.chat_id, renderedChunk, message.thread_id, 'HTML');
       if (ok) {
         sentChunks += 1;
       }
@@ -164,7 +169,7 @@ export async function handleIncomingMessage(
       error: error instanceof Error ? error.message : 'Unknown error',
     });
 
-    await telegramClient.sendTextMessage(message.chat_id, fallbackMessage);
+    await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
     return { handled: false, reason: 'engine_error' };
   }
 }
@@ -220,4 +225,39 @@ function buildHelpMessage(): string {
     '- Continue the current conversation',
     '- Reset the current conversation with /reset',
   ].join('\n');
+}
+
+async function sendTextMessage(
+  telegramClient: TelegramClient,
+  chatId: string,
+  text: string,
+  threadId?: string,
+  parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML'
+): Promise<boolean> {
+  if (threadId) {
+    if (parseMode) {
+      return telegramClient.sendTextMessage(chatId, text, parseMode, threadId);
+    }
+
+    return telegramClient.sendTextMessage(chatId, text, undefined, threadId);
+  }
+
+  if (parseMode) {
+    return telegramClient.sendTextMessage(chatId, text, parseMode);
+  }
+
+  return telegramClient.sendTextMessage(chatId, text);
+}
+
+async function sendChatAction(
+  telegramClient: TelegramClient,
+  chatId: string,
+  action: 'typing' | 'upload_photo' | 'record_video' | 'upload_video' | 'record_voice' | 'upload_voice' | 'upload_document' | 'find_location' | 'record_video_note' | 'upload_video_note',
+  threadId?: string
+): Promise<boolean> {
+  if (threadId) {
+    return telegramClient.sendChatAction(chatId, action, threadId);
+  }
+
+  return telegramClient.sendChatAction(chatId, action);
 }

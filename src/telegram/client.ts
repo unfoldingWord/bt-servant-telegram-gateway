@@ -33,13 +33,15 @@ export class TelegramClient {
   async sendTextMessage(
     chatId: string,
     text: string,
-    parseMode?: TelegramParseMode
+    parseMode?: TelegramParseMode,
+    messageThreadId?: string
   ): Promise<boolean> {
     try {
       await this.http.post<TelegramApiResponse<TelegramSendMessageResult>>('/sendMessage', {
         chat_id: chatId,
         text,
         ...(parseMode ? { parse_mode: parseMode } : {}),
+        ...(messageThreadId ? { message_thread_id: Number.parseInt(messageThreadId, 10) } : {}),
       });
       return true;
     } catch (error) {
@@ -48,11 +50,16 @@ export class TelegramClient {
     }
   }
 
-  async sendChatAction(chatId: string, action: TelegramChatAction): Promise<boolean> {
+  async sendChatAction(
+    chatId: string,
+    action: TelegramChatAction,
+    messageThreadId?: string
+  ): Promise<boolean> {
     try {
       await this.http.post<TelegramApiResponse<boolean>>('/sendChatAction', {
         chat_id: chatId,
         action,
+        ...(messageThreadId ? { message_thread_id: Number.parseInt(messageThreadId, 10) } : {}),
       });
       return true;
     } catch (error) {

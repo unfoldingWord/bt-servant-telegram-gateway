@@ -40,6 +40,22 @@ describe('TelegramClient', () => {
     });
   });
 
+  it('sends a text message to a topic thread when provided', async () => {
+    create.mockReturnValue({ post });
+    post.mockResolvedValue({ data: { ok: true, result: { message_id: 1 } } });
+
+    const { TelegramClient } = await import('../../src/telegram/client.js');
+    const client = new TelegramClient('bot-token');
+
+    await expect(client.sendTextMessage('123', 'hello', 'HTML', '7')).resolves.toBe(true);
+    expect(post).toHaveBeenCalledWith('/sendMessage', {
+      chat_id: '123',
+      text: 'hello',
+      parse_mode: 'HTML',
+      message_thread_id: 7,
+    });
+  });
+
   it('sends chat actions', async () => {
     create.mockReturnValue({ post });
     post.mockResolvedValue({ data: { ok: true, result: true } });
@@ -51,6 +67,21 @@ describe('TelegramClient', () => {
     expect(post).toHaveBeenCalledWith('/sendChatAction', {
       chat_id: '123',
       action: 'typing',
+    });
+  });
+
+  it('sends chat actions to a topic thread when provided', async () => {
+    create.mockReturnValue({ post });
+    post.mockResolvedValue({ data: { ok: true, result: true } });
+
+    const { TelegramClient } = await import('../../src/telegram/client.js');
+    const client = new TelegramClient('bot-token');
+
+    await expect(client.sendChatAction('123', 'typing', '7')).resolves.toBe(true);
+    expect(post).toHaveBeenCalledWith('/sendChatAction', {
+      chat_id: '123',
+      action: 'typing',
+      message_thread_id: 7,
     });
   });
 

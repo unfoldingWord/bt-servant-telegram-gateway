@@ -146,6 +146,53 @@ describe('handleIncomingMessage', () => {
     expect(engineClient.sendTextMessage).not.toHaveBeenCalled();
   });
 
+  it('keeps thread replies inside the originating topic', async () => {
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn().mockResolvedValue({
+        message: 'Topic reply',
+      }),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '-5121603836',
+        chat_type: 'supergroup',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: 'hello bot',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        thread_id: '7',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(telegramClient.sendChatAction).toHaveBeenCalledWith('-5121603836', 'typing', '7');
+    expect(telegramClient.sendTextMessage).toHaveBeenCalledWith(
+      '-5121603836',
+      expect.stringContaining('Topic reply'),
+      'HTML',
+      '7'
+    );
+    expect(result).toEqual({ handled: true, sentChunks: 1 });
+  });
+
   it('sends fallback message when engine fails', async () => {
     const telegramClient = {
       sendChatAction: vi.fn().mockResolvedValue(true),
