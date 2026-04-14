@@ -131,9 +131,7 @@ export class EngineClient {
       responseLanguageHint: context.responseLanguageHint,
       org: this.org,
       messageLength: message.length,
-      messagePreview: previewText(message),
       timeoutMs: config.engineTimeoutMs,
-      requestKeys: Object.keys(payload),
     });
 
     try {
@@ -141,7 +139,6 @@ export class EngineClient {
       console.info('Engine chat response received', {
         userId,
         durationMs: Date.now() - startedAt,
-        keys: Object.keys(response.data ?? {}),
         responseKeys: summarizeResponseKeys(response.data),
       });
       return this.mapChatResponse(response.data);
@@ -152,15 +149,12 @@ export class EngineClient {
           userId,
           retryDelayMs: retryDelay,
           durationMs: Date.now() - startedAt,
-          timeoutMs: config.engineTimeoutMs,
-          messagePreview: previewText(message),
         });
         await this.sleep(retryDelay);
         const response = await this.http.post<EngineChatApiResponse>('/api/v1/chat', payload);
         console.info('Engine chat response received after retry', {
           userId,
           durationMs: Date.now() - startedAt,
-          keys: Object.keys(response.data ?? {}),
           responseKeys: summarizeResponseKeys(response.data),
         });
         return this.mapChatResponse(response.data);
@@ -186,7 +180,6 @@ export class EngineClient {
         userId,
         path,
         durationMs: Date.now() - startedAt,
-        responseKeys: Object.keys(response.data ?? {}),
         preferenceKeys: summarizeResponseKeys(response.data),
       });
       return this.mapPreferencesResponse(response.data);
@@ -224,7 +217,6 @@ export class EngineClient {
         userId,
         path,
         durationMs: Date.now() - startedAt,
-        responseKeys: Object.keys(response.data ?? {}),
         preferenceKeys: summarizeResponseKeys(response.data),
       });
       return this.mapPreferencesResponse(response.data);
@@ -460,15 +452,6 @@ export class EngineClient {
   private async sleep(ms: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms));
   }
-}
-
-function previewText(text: string, maxLength = 120): string {
-  const normalized = text.replace(/\s+/gu, ' ').trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
 function summarizeResponseKeys(data: unknown): string[] {

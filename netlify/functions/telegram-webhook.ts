@@ -29,9 +29,7 @@ export const handler: Handler = async (event) => {
     const body = event.body || '';
     console.info('Telegram webhook request received', {
       method: event.httpMethod,
-      contentType: headers['content-type'] ?? '',
       bodyLength: body.length,
-      bodyPreview: previewText(body),
       hasSecretHeader: Boolean(headers['x-telegram-bot-api-secret-token']),
     });
 
@@ -39,18 +37,10 @@ export const handler: Handler = async (event) => {
     console.info('Telegram webhook update received', {
       updateId: update.update_id,
       updateType: summarizeUpdateType(update),
-      keys: Object.keys(update),
-      messageKeys: update.message ? Object.keys(update.message) : [],
-      editedMessageKeys: update.edited_message ? Object.keys(update.edited_message) : [],
       messageType: update.message?.chat.type,
-      messageText: update.message?.text ?? '',
-      messageCaption: update.message?.caption ?? '',
-      messageEntities: update.message?.entities?.map((entity) => ({
-        type: entity.type,
-        offset: entity.offset,
-        length: entity.length,
-      })) ?? [],
-      fromUsername: update.message?.from?.username,
+      chatId: update.message?.chat.id,
+      hasText: Boolean(update.message?.text),
+      hasEntities: Boolean(update.message?.entities?.length),
     });
 
     const message = parseTelegramUpdate(
@@ -111,13 +101,4 @@ function summarizeUpdateType(update: Parameters<typeof parseTelegramUpdate>[0]):
 
   const activeTypes = knownTypes.filter((type) => Object.prototype.hasOwnProperty.call(update, type));
   return activeTypes.length > 0 ? activeTypes.join(',') : 'unknown';
-}
-
-function previewText(text: string, maxLength = 160): string {
-  const normalized = text.replace(/\s+/gu, ' ').trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, maxLength - 1)}…`;
 }

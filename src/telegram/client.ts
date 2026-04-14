@@ -37,15 +37,13 @@ export class TelegramClient {
     messageThreadId?: string
   ): Promise<boolean> {
     const startedAt = Date.now();
-    const payload = {
+    console.info('Telegram sendTextMessage start', {
       chatId,
       threadId: messageThreadId,
       parseMode,
       textLength: text.length,
-      textPreview: previewText(text),
       timeoutMs: config.telegramTimeoutMs,
-    };
-    console.info('Telegram sendTextMessage start', payload);
+    });
     try {
       const response = await this.http.post<TelegramApiResponse<TelegramSendMessageResult>>('/sendMessage', {
         chat_id: chatId,
@@ -54,10 +52,9 @@ export class TelegramClient {
         ...(messageThreadId ? { message_thread_id: Number.parseInt(messageThreadId, 10) } : {}),
       });
       console.info('Telegram sendTextMessage success', {
-        ...payload,
+        chatId,
+        threadId: messageThreadId,
         durationMs: Date.now() - startedAt,
-        responseKeys: Object.keys(response.data ?? {}),
-        resultKeys: summarizeObjectKeys(response.data?.result),
         ok: response.data?.ok,
       });
       return true;
@@ -67,7 +64,6 @@ export class TelegramClient {
         threadId: messageThreadId ?? '',
         parseMode: parseMode ?? '',
         textLength: String(text.length),
-        textPreview: previewText(text),
         timeoutMs: String(config.telegramTimeoutMs),
         durationMs: String(Date.now() - startedAt),
       });
@@ -81,13 +77,12 @@ export class TelegramClient {
     messageThreadId?: string
   ): Promise<boolean> {
     const startedAt = Date.now();
-    const payload = {
+    console.info('Telegram sendChatAction start', {
       chatId,
       threadId: messageThreadId,
       action,
       timeoutMs: config.telegramTimeoutMs,
-    };
-    console.info('Telegram sendChatAction start', payload);
+    });
     try {
       const response = await this.http.post<TelegramApiResponse<boolean>>('/sendChatAction', {
         chat_id: chatId,
@@ -95,9 +90,10 @@ export class TelegramClient {
         ...(messageThreadId ? { message_thread_id: Number.parseInt(messageThreadId, 10) } : {}),
       });
       console.info('Telegram sendChatAction success', {
-        ...payload,
+        chatId,
+        threadId: messageThreadId,
+        action,
         durationMs: Date.now() - startedAt,
-        responseKeys: Object.keys(response.data ?? {}),
         ok: response.data?.ok,
       });
       return true;
@@ -115,22 +111,20 @@ export class TelegramClient {
 
   async setWebhook(url: string, secretToken: string = config.webhookSecretToken || ''): Promise<boolean> {
     const startedAt = Date.now();
-    const payload = {
+    console.info('Telegram setWebhook start', {
       url,
       hasSecretToken: Boolean(secretToken),
-    };
-    console.info('Telegram setWebhook start', payload);
+    });
     try {
       const response = await this.http.post<TelegramApiResponse<TelegramWebhookInfo>>('/setWebhook', {
         url,
         ...(secretToken ? { secret_token: secretToken } : {}),
       });
       console.info('Telegram setWebhook success', {
-        ...payload,
+        url,
+        hasSecretToken: Boolean(secretToken),
         durationMs: Date.now() - startedAt,
-        responseKeys: Object.keys(response.data ?? {}),
         ok: response.data?.ok,
-        resultKeys: response.data && typeof response.data === 'object' ? Object.keys(response.data.result ?? {}) : [],
       });
       return true;
     } catch (error) {
@@ -167,15 +161,6 @@ export class TelegramClient {
   }
 }
 
-function previewText(text: string, maxLength = 120): string {
-  const normalized = text.replace(/\s+/gu, ' ').trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, maxLength - 1)}…`;
-}
-
 function summarizeResponseData(data: unknown): unknown {
   if (!data || typeof data !== 'object') {
     return data;
@@ -192,12 +177,4 @@ function summarizeResponseData(data: unknown): unknown {
   return {
     keys: Object.keys(data as Record<string, unknown>),
   };
-}
-
-function summarizeObjectKeys(value: unknown): string[] {
-  if (!value || typeof value !== 'object') {
-    return [];
-  }
-
-  return Object.keys(value as Record<string, unknown>);
 }
