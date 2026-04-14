@@ -52,6 +52,18 @@ export async function handleIncomingMessage(
     return { handled: false, reason: 'too_old' };
   }
 
+  if (isGroupChat(message.chat_type) && !message.addressed_to_bot) {
+    console.info('Ignoring group message without direct bot address', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+      chatType: message.chat_type,
+      speaker: message.speaker,
+      threadId: message.thread_id,
+      text: previewText(message.text),
+    });
+    return { handled: false, reason: 'unsupported_message' };
+  }
+
   if (isResetCommand(message.text)) {
     try {
       await engineGateway.resetConversation(
@@ -172,6 +184,10 @@ function normalizeChatType(chatType: IncomingMessage['chat_type']): 'private' | 
   }
 
   return 'private';
+}
+
+function isGroupChat(chatType: IncomingMessage['chat_type']): chatType is 'group' | 'supergroup' {
+  return chatType === 'group' || chatType === 'supergroup';
 }
 
 function isResetCommand(text: string): boolean {

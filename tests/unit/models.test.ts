@@ -41,6 +41,7 @@ describe('core models', () => {
       speaker: 'Alex',
       speaker_language_code: undefined,
       thread_id: undefined,
+      addressed_to_bot: true,
     });
   });
 
@@ -80,6 +81,104 @@ describe('core models', () => {
       speaker: 'Alice Smith',
       speaker_language_code: 'en',
       thread_id: '7',
+      addressed_to_bot: false,
+    });
+  });
+
+  it('detects group mentions when bot username is provided', () => {
+    const update = {
+      update_id: 3,
+      message: {
+        message_id: 111,
+        from: {
+          id: 1003,
+          is_bot: false,
+          first_name: 'Bob',
+        },
+        chat: {
+          id: -5121603836,
+          type: 'group' as const,
+          title: 'Study Group',
+        },
+        date: 1_700_000_200,
+        text: '@bt24_test_bot what can you do?',
+        entities: [
+          {
+            offset: 0,
+            length: 14,
+            type: 'mention' as const,
+          },
+        ],
+      },
+    };
+
+    expect(parseTelegramUpdate(update, 3600, 'bt24_test_bot')).toEqual({
+      user_id: '1003',
+      chat_id: '-5121603836',
+      chat_type: 'group',
+      message_id: '111',
+      message_type: MessageType.TEXT,
+      timestamp: 1_700_000_200,
+      text: '@bt24_test_bot what can you do?',
+      file_id: null,
+      message_age_cutoff: 3600,
+      speaker: 'Bob',
+      speaker_language_code: undefined,
+      thread_id: undefined,
+      addressed_to_bot: true,
+    });
+  });
+
+  it('detects replies to bot messages in groups', () => {
+    const update = {
+      update_id: 4,
+      message: {
+        message_id: 112,
+        from: {
+          id: 1004,
+          is_bot: false,
+          first_name: 'Cara',
+        },
+        chat: {
+          id: -5121603836,
+          type: 'group' as const,
+          title: 'Study Group',
+        },
+        date: 1_700_000_300,
+        text: 'Рим 1:16',
+        reply_to_message: {
+          message_id: 111,
+          from: {
+            id: 9999,
+            is_bot: true,
+            first_name: 'BT Servant',
+            username: 'bt24_test_bot',
+          },
+          chat: {
+            id: -5121603836,
+            type: 'group' as const,
+            title: 'Study Group',
+          },
+          date: 1_700_000_200,
+          text: 'How can I help?',
+        },
+      },
+    };
+
+    expect(parseTelegramUpdate(update, 3600, 'bt24_test_bot')).toEqual({
+      user_id: '1004',
+      chat_id: '-5121603836',
+      chat_type: 'group',
+      message_id: '112',
+      message_type: MessageType.TEXT,
+      timestamp: 1_700_000_300,
+      text: 'Рим 1:16',
+      file_id: null,
+      message_age_cutoff: 3600,
+      speaker: 'Cara',
+      speaker_language_code: undefined,
+      thread_id: undefined,
+      addressed_to_bot: true,
     });
   });
 
@@ -141,6 +240,7 @@ describe('core models', () => {
       speaker: 'Alex',
       speaker_language_code: undefined,
       thread_id: undefined,
+      addressed_to_bot: false,
     });
     expect(isSupportedMessageType(MessageType.UNKNOWN)).toBe(false);
   });
@@ -160,6 +260,7 @@ describe('core models', () => {
       file_id: null,
       message_age_cutoff: 300,
       speaker: 'Alex',
+      addressed_to_bot: true,
     };
 
     expect(getMessageAge(message)).toBe(600);

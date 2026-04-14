@@ -41,6 +41,7 @@ describe('handleIncomingMessage', () => {
         file_id: null,
         message_age_cutoff: 3600,
         speaker: 'Alex',
+        addressed_to_bot: true,
       },
       {
         telegramClient: telegramClient as never,
@@ -93,6 +94,46 @@ describe('handleIncomingMessage', () => {
         file_id: null,
         message_age_cutoff: 3600,
         speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(result).toEqual({ handled: false, reason: 'unsupported_message' });
+    expect(telegramClient.sendChatAction).not.toHaveBeenCalled();
+    expect(engineClient.sendTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('ignores group messages that are not addressed to the bot', async () => {
+    const telegramClient = {
+      sendChatAction: vi.fn(),
+      sendTextMessage: vi.fn(),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn(),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '-5121603836',
+        chat_type: 'group',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: 'hello everyone',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: false,
       },
       {
         telegramClient: telegramClient as never,
@@ -131,6 +172,7 @@ describe('handleIncomingMessage', () => {
         file_id: null,
         message_age_cutoff: 3600,
         speaker: 'Alex',
+        addressed_to_bot: true,
       },
       {
         telegramClient: telegramClient as never,
@@ -171,6 +213,7 @@ describe('handleIncomingMessage', () => {
         file_id: null,
         message_age_cutoff: 3600,
         speaker: 'Alex',
+        addressed_to_bot: true,
       },
       {
         telegramClient: telegramClient as never,
@@ -213,6 +256,7 @@ describe('handleIncomingMessage', () => {
         file_id: null,
         message_age_cutoff: 3600,
         speaker: 'Alex',
+        addressed_to_bot: true,
       },
       {
         telegramClient: telegramClient as never,
@@ -255,6 +299,7 @@ describe('handleIncomingMessage', () => {
         file_id: null,
         message_age_cutoff: 3600,
         speaker: 'Alex',
+        addressed_to_bot: true,
       },
       {
         telegramClient: telegramClient as never,
@@ -299,6 +344,7 @@ describe('handleIncomingMessage', () => {
         file_id: null,
         message_age_cutoff: 3600,
         speaker: 'Alex',
+        addressed_to_bot: true,
       },
       {
         telegramClient: telegramClient as never,
@@ -342,6 +388,7 @@ describe('handleIncomingMessage', () => {
         file_id: null,
         message_age_cutoff: 3600,
         speaker: 'Alex',
+        addressed_to_bot: true,
       },
       {
         telegramClient: telegramClient as never,

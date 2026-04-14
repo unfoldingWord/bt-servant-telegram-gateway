@@ -47,6 +47,7 @@ describe('gateway integration smoke', () => {
           speaker: 'Alice',
           speaker_language_code: 'en',
           thread_id: 'thread-1',
+          addressed_to_bot: true,
         },
         {
           telegramClient,

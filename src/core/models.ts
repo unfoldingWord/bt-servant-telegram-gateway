@@ -16,6 +16,7 @@ export interface IncomingMessage {
   speaker: string;
   speaker_language_code?: string;
   thread_id?: string;
+  addressed_to_bot: boolean;
 }
 
 export interface TelegramUpdate {
@@ -31,11 +32,23 @@ export interface TelegramMessage {
   date: number;
   message_thread_id?: number;
   text?: string;
+  entities?: TelegramMessageEntity[];
+  reply_to_message?: TelegramMessage;
   voice?: TelegramVoice;
   audio?: TelegramAudio;
   photo?: TelegramPhoto[];
   document?: TelegramDocument;
   caption?: string;
+}
+
+export interface TelegramMessageEntity {
+  offset: number;
+  length: number;
+  type: 'mention' | 'bot_command' | 'hashtag' | 'cashtag' | 'url' | 'email' | 'phone_number' | 'bold' | 'italic' | 'underline' | 'strikethrough' | 'spoiler' | 'blockquote' | 'expandable_blockquote' | 'code' | 'pre' | 'text_link' | 'text_mention' | 'custom_emoji';
+  user?: TelegramUser;
+  url?: string;
+  language?: string;
+  custom_emoji_id?: string;
 }
 
 export interface TelegramUser {
@@ -99,7 +112,8 @@ type TelegramMessageContent =
  */
 export function parseTelegramUpdate(
   update: TelegramUpdate,
-  messageAgeCutoff: number
+  messageAgeCutoff: number,
+  botUsername?: string
 ): IncomingMessage | null {
   const message = update.message || update.edited_message;
   if (!message) {
@@ -117,6 +131,7 @@ export function parseTelegramUpdate(
   const message_id = String(message.message_id);
   const timestamp = message.date;
   const speaker = buildSpeakerLabel(from);
+  const addressedToBot = isAddressedToBot(message, botUsername);
 
   let content: TelegramMessageContent = {
     messageType: MessageType.UNKNOWN,
@@ -144,6 +159,7 @@ export function parseTelegramUpdate(
     speaker,
     speaker_language_code: from.language_code,
     thread_id: message.message_thread_id ? String(message.message_thread_id) : undefined,
+    addressed_to_bot: addressedToBot,
   };
 }
 
@@ -182,4 +198,66 @@ function buildSpeakerLabel(user: TelegramUser): string {
   }
 
   return String(user.id);
+}
+
+function isAddressedToBot(message: TelegramMessage, botUsername?: string): boolean {
+  const text = message.text ?? message.caption ?? '';
+  const normalizedText = text.trim();
+
+  if (!normalizedText) {
+    return false;
+  }
+
+  if (message.chat.type === 'private') {
+    return true;
+  }
+
+  if (normalizedText.startsWith('/')) {
+    return true;
+  }
+
+  if (isReplyToBot(message, botUsername)) {
+    return true;
+  }
+
+  if (!botUsername) {
+    return false;
+  }
+
+  const mention = `@${botUsername.replace(/^@/u, '').toLowerCase()}`;
+  const textLower = normalizedText.toLowerCase();
+  const entityMention = message.entities?.some((entity) => {
+    if (entity.type !== 'mention' && entity.type !== 'bot_command') {
+      return false;
+    }
+
+    const slice = normalizedText.slice(entity.offset, entity.offset + entity.length).toLowerCase();
+    return slice.includes(mention);
+  });
+
+  if (entityMention) {
+    return true;
+  }
+
+  return textLower.includes(mention);
+}
+
+function isReplyToBot(message: TelegramMessage, botUsername?: string): boolean {
+  const repliedMessage = message.reply_to_message;
+  if (!repliedMessage) {
+    return false;
+  }
+
+  const repliedFrom = repliedMessage.from;
+  if (repliedFrom?.is_bot) {
+    return true;
+  }
+
+  const repliedUsername = repliedFrom?.username?.trim().toLowerCase();
+  const normalizedBotUsername = botUsername?.replace(/^@/u, '').trim().toLowerCase();
+  if (!repliedUsername || !normalizedBotUsername) {
+    return false;
+  }
+
+  return repliedUsername === normalizedBotUsername;
 }

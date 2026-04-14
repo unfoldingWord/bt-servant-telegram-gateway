@@ -27,7 +27,27 @@ export const handler: Handler = (event) => {
 
   try {
     const update = JSON.parse(event.body || '{}') as Parameters<typeof parseTelegramUpdate>[0];
-    const message = parseTelegramUpdate(update, config.messageAgeCutoffInSeconds);
+    console.info('Telegram webhook update received', {
+      updateId: update.update_id,
+      keys: Object.keys(update),
+      messageKeys: update.message ? Object.keys(update.message) : [],
+      editedMessageKeys: update.edited_message ? Object.keys(update.edited_message) : [],
+      messageType: update.message?.chat.type,
+      messageText: update.message?.text ?? '',
+      messageCaption: update.message?.caption ?? '',
+      messageEntities: update.message?.entities?.map((entity) => ({
+        type: entity.type,
+        offset: entity.offset,
+        length: entity.length,
+      })) ?? [],
+      fromUsername: update.message?.from?.username,
+    });
+
+    const message = parseTelegramUpdate(
+      update,
+      config.messageAgeCutoffInSeconds,
+      config.telegramBotUsername
+    );
 
     if (!message) {
       return Promise.resolve({ statusCode: 200, body: JSON.stringify({ ok: true, ignored: true }) });

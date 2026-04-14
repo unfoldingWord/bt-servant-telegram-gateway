@@ -4,6 +4,7 @@ dotenv.config();
 
 interface Config {
   telegramBotToken: string;
+  telegramBotUsername: string | undefined;
   webhookSecretToken: string | undefined;
 
   engineBaseUrl: string;
@@ -45,6 +46,7 @@ function getEnvNumber(name: string, defaultValue: number): number {
 
 export const config: Config = {
   telegramBotToken: getEnvVar('TELEGRAM_BOT_TOKEN'),
+  telegramBotUsername: getOptionalEnvVar('TELEGRAM_BOT_USERNAME'),
   webhookSecretToken: process.env.WEBHOOK_SECRET_TOKEN,
   engineBaseUrl: getEnvVar('ENGINE_BASE_URL'),
   engineApiKey: getEnvVar('ENGINE_API_KEY'),
