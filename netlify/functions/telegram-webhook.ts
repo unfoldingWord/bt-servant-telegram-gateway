@@ -12,7 +12,7 @@ function hasValidSecretToken(headers: Record<string, string | undefined>): boole
   return headers['x-telegram-bot-api-secret-token'] === config.webhookSecretToken;
 }
 
-export const handler: Handler = (event) => {
+export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return Promise.resolve({ statusCode: 405, body: 'Method Not Allowed' });
   }
@@ -63,16 +63,26 @@ export const handler: Handler = (event) => {
       return Promise.resolve({ statusCode: 200, body: JSON.stringify({ ok: true, ignored: true }) });
     }
 
-    void handleIncomingMessage(message, {
+    const startedAt = Date.now();
+    const result = await handleIncomingMessage(message, {
       progressThrottleSeconds: config.progressThrottleSeconds,
     }).catch((error) => {
       console.error('Webhook background handler failed', {
         error: error instanceof Error ? error.message : 'Unknown error',
         updateId: update.update_id,
       });
+      return null;
     });
 
-    return Promise.resolve({ statusCode: 200, body: JSON.stringify({ ok: true }) });
+    console.info('Telegram webhook handled', {
+      updateId: update.update_id,
+      handled: result?.handled ?? false,
+      reason: result?.reason,
+      sentChunks: result?.sentChunks ?? 0,
+      durationMs: Date.now() - startedAt,
+    });
+
+    return { statusCode: 200, body: JSON.stringify({ ok: true }) };
   } catch (error) {
     console.error('Telegram webhook failed', {
       error: error instanceof Error ? error.message : 'Unknown error',
