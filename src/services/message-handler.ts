@@ -7,8 +7,8 @@ import { formatTelegramHtml } from './telegram-format.js';
 import { TelegramClient } from '../telegram/client.js';
 
 export interface MessageHandlerDependencies {
-  telegramClient?: TelegramClient;
-  engineClient?: EngineClient;
+  telegramClient: TelegramClient;
+  engineClient: EngineClient;
   engineGateway?: EngineGateway;
   progressThrottleSeconds?: number;
   fallbackMessage?: string;
@@ -24,10 +24,9 @@ const DEFAULT_FALLBACK_MESSAGE = 'Sorry, something went wrong. Please try again.
 
 export async function handleIncomingMessage(
   message: IncomingMessage,
-  dependencies: MessageHandlerDependencies = {}
+  dependencies: MessageHandlerDependencies
 ): Promise<MessageHandlerResult> {
-  const telegramClient = dependencies.telegramClient ?? new TelegramClient();
-  const engineClient = dependencies.engineClient ?? new EngineClient();
+  const { telegramClient, engineClient } = dependencies;
   const engineGateway = dependencies.engineGateway ?? new EngineGateway(engineClient);
   const fallbackMessage = dependencies.fallbackMessage ?? DEFAULT_FALLBACK_MESSAGE;
 
@@ -80,7 +79,12 @@ export async function handleIncomingMessage(
         threadId: message.thread_id,
       });
 
-      await sendTextMessage(telegramClient, message.chat_id, 'Conversation has been reset.', message.thread_id);
+      await sendTextMessage(
+        telegramClient,
+        message.chat_id,
+        'Conversation has been reset.',
+        message.thread_id
+      );
       return { handled: true, reason: 'reset', sentChunks: 1 };
     } catch (error) {
       console.error('Conversation reset failed', {
@@ -100,7 +104,12 @@ export async function handleIncomingMessage(
   }
 
   if (isStartCommand(message.text)) {
-    await sendTextMessage(telegramClient, message.chat_id, buildStartMessage(message), message.thread_id);
+    await sendTextMessage(
+      telegramClient,
+      message.chat_id,
+      buildStartMessage(message),
+      message.thread_id
+    );
     return { handled: true, sentChunks: 1 };
   }
 
@@ -144,7 +153,13 @@ export async function handleIncomingMessage(
         html: previewText(renderedChunk),
       });
 
-      const ok = await sendTextMessage(telegramClient, message.chat_id, renderedChunk, message.thread_id, 'HTML');
+      const ok = await sendTextMessage(
+        telegramClient,
+        message.chat_id,
+        renderedChunk,
+        message.thread_id,
+        'HTML'
+      );
       if (ok) {
         sentChunks += 1;
       }
@@ -179,7 +194,9 @@ function previewText(text: string, maxLength = 240): string {
   return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
-function normalizeChatType(chatType: IncomingMessage['chat_type']): 'private' | 'group' | 'supergroup' {
+function normalizeChatType(
+  chatType: IncomingMessage['chat_type']
+): 'private' | 'group' | 'supergroup' {
   if (chatType === 'group' || chatType === 'supergroup') {
     return chatType;
   }
@@ -248,7 +265,17 @@ async function sendTextMessage(
 async function sendChatAction(
   telegramClient: TelegramClient,
   chatId: string,
-  action: 'typing' | 'upload_photo' | 'record_video' | 'upload_video' | 'record_voice' | 'upload_voice' | 'upload_document' | 'find_location' | 'record_video_note' | 'upload_video_note',
+  action:
+    | 'typing'
+    | 'upload_photo'
+    | 'record_video'
+    | 'upload_video'
+    | 'record_voice'
+    | 'upload_voice'
+    | 'upload_document'
+    | 'find_location'
+    | 'record_video_note'
+    | 'upload_video_note',
   threadId?: string
 ): Promise<boolean> {
   if (threadId) {

@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-const {
-  GATEWAY_PUBLIC_URL,
-  TELEGRAM_BOT_TOKEN,
-  WEBHOOK_SECRET_TOKEN,
-  LIVE_E2E_CHAT_ID,
-} = process.env;
+const { GATEWAY_PUBLIC_URL, TELEGRAM_BOT_TOKEN, WEBHOOK_SECRET_TOKEN, LIVE_E2E_CHAT_ID } =
+  process.env;
 
 const liveEnabled =
   Boolean(GATEWAY_PUBLIC_URL?.trim()) &&
@@ -20,7 +16,9 @@ describeLive('live e2e gateway smoke', () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        ...(WEBHOOK_SECRET_TOKEN ? { 'x-telegram-bot-api-secret-token': WEBHOOK_SECRET_TOKEN } : {}),
+        ...(WEBHOOK_SECRET_TOKEN
+          ? { 'x-telegram-bot-api-secret-token': WEBHOOK_SECRET_TOKEN }
+          : {}),
       },
       body: JSON.stringify({
         update_id: Date.now(),
