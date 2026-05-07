@@ -1,76 +1,67 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-process.env.TELEGRAM_BOT_TOKEN = 'telegram-token';
-process.env.ENGINE_BASE_URL = 'https://engine.example.com';
-process.env.ENGINE_API_KEY = 'engine-key';
-process.env.GATEWAY_PUBLIC_URL = 'https://gateway.example.com';
-
-const post = vi.fn();
-const get = vi.fn();
-const put = vi.fn();
-const create = vi.fn();
-
-vi.mock('axios', async () => {
-  const actual = await vi.importActual<typeof import('axios')>('axios');
-  return {
-    ...actual,
-    default: {
-      create,
-      isAxiosError: actual.isAxiosError,
-    },
-  };
-});
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EngineClient } from '../../src/services/engine-client.js';
 
 describe('EngineClient', () => {
-  afterEach(() => {
-    post.mockReset();
-    get.mockReset();
-    put.mockReset();
-    create.mockReset();
-    vi.resetModules();
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
   });
 
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  function jsonResponse(data: unknown, status = 200): Response {
+    return new Response(JSON.stringify(data), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   it('sends chat requests with engine metadata', async () => {
-    create.mockReturnValue({ post, get, put });
-    post.mockResolvedValue({ data: { response: 'ok', message_key: 'server-key' } });
+    fetchMock.mockResolvedValue(jsonResponse({ response: 'ok', message_key: 'server-key' }));
 
-    const { EngineClient } = await import('../../src/services/engine-client.js');
-    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
 
-    const result = await client.sendTextMessage('user-1', 'hello', 'https://gateway/progress', 7);
+    const result = await client.sendTextMessage('user-1', 'hello');
 
-    expect(post).toHaveBeenCalledWith('/api/v1/chat', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://engine.example.com/api/v1/chat',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"client_id":"telegram-gateway"'),
+      })
+    );
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body).toMatchObject({
       client_id: 'telegram-gateway',
       user_id: 'user-1',
       message_type: 'text',
       message: 'hello',
       org: 'org-1',
-    }));
+    });
     expect(result.message).toBe('ok');
   });
 
   it('sends extended chat context when provided', async () => {
-    create.mockReturnValue({ post, get, put });
-    post.mockResolvedValue({ data: { response: 'ok' } });
+    fetchMock.mockResolvedValue(jsonResponse({ response: 'ok' }));
 
-    const { EngineClient } = await import('../../src/services/engine-client.js');
-    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
 
-    await client.sendTextMessage(
-      'user-1',
-      'hello',
-      {
-        chatType: 'group',
-        chatId: 'group-42',
-        speaker: 'Alice',
-        threadId: 'thread-7',
-        responseLanguageHint: 'ru',
-      },
-      'https://gateway/progress',
-      5
-    );
+    await client.sendTextMessage('user-1', 'hello', {
+      chatType: 'group',
+      chatId: 'group-42',
+      speaker: 'Alice',
+      threadId: 'thread-7',
+      responseLanguageHint: 'ru',
+    });
 
-    expect(post).toHaveBeenCalledWith('/api/v1/chat', expect.objectContaining({
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body).toMatchObject({
       client_id: 'telegram-gateway',
       user_id: 'user-1',
       message_type: 'text',
@@ -81,40 +72,34 @@ describe('EngineClient', () => {
       thread_id: 'thread-7',
       response_language_hint: 'ru',
       org: 'org-1',
-    }));
+    });
   });
 
   it('returns empty preferences for missing user prefs', async () => {
-    create.mockReturnValue({ post, get, put });
-    get.mockRejectedValue({
-      isAxiosError: true,
-      response: { status: 404 },
-    });
+    fetchMock.mockResolvedValue(jsonResponse({}, 404));
 
-    const { EngineClient } = await import('../../src/services/engine-client.js');
-    const client = new EngineClient('https://engine.example.com', 'engine-key');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', undefined, 45000);
 
     await expect(client.getUserPreferences('user-1')).resolves.toEqual({});
   });
 
   it('maps preferences response payloads', async () => {
-    create.mockReturnValue({ post, get, put });
-    get.mockResolvedValue({ data: { prefs: { language: 'en' } } });
-    put.mockResolvedValue({ data: { preferences: { timezone: 'UTC' } } });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ prefs: { language: 'en' } }))
+      .mockResolvedValueOnce(jsonResponse({ preferences: { timezone: 'UTC' } }));
 
-    const { EngineClient } = await import('../../src/services/engine-client.js');
-    const client = new EngineClient('https://engine.example.com', 'engine-key');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', undefined, 45000);
 
     await expect(client.getUserPreferences('user-1')).resolves.toEqual({ language: 'en' });
-    await expect(client.updateUserPreferences('user-1', { timezone: 'UTC' })).resolves.toEqual({ timezone: 'UTC' });
+    await expect(client.updateUserPreferences('user-1', { timezone: 'UTC' })).resolves.toEqual({
+      timezone: 'UTC',
+    });
   });
 
   it('extracts text from alternate engine response fields', async () => {
-    create.mockReturnValue({ post, get, put });
-    post.mockResolvedValue({ data: { text: 'hello from text field' } });
+    fetchMock.mockResolvedValue(jsonResponse({ text: 'hello from text field' }));
 
-    const { EngineClient } = await import('../../src/services/engine-client.js');
-    const client = new EngineClient('https://engine.example.com', 'engine-key');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', undefined, 45000);
 
     await expect(client.sendTextMessage('user-1', 'hello')).resolves.toMatchObject({
       message: 'hello from text field',
@@ -122,18 +107,13 @@ describe('EngineClient', () => {
   });
 
   it('extracts text from responses arrays', async () => {
-    create.mockReturnValue({ post, get, put });
-    post.mockResolvedValue({
-      data: {
-        responses: [
-          { text: 'first part' },
-          { message: 'second part' },
-        ],
-      },
-    });
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        responses: [{ text: 'first part' }, { message: 'second part' }],
+      })
+    );
 
-    const { EngineClient } = await import('../../src/services/engine-client.js');
-    const client = new EngineClient('https://engine.example.com', 'engine-key');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', undefined, 45000);
 
     await expect(client.sendTextMessage('user-1', 'hello')).resolves.toMatchObject({
       message: 'first part\nsecond part',
@@ -141,16 +121,9 @@ describe('EngineClient', () => {
   });
 
   it('extracts text from top-level array responses', async () => {
-    create.mockReturnValue({ post, get, put });
-    post.mockResolvedValue({
-      data: [
-        { text: 'first part' },
-        { message: 'second part' },
-      ],
-    });
+    fetchMock.mockResolvedValue(jsonResponse([{ text: 'first part' }, { message: 'second part' }]));
 
-    const { EngineClient } = await import('../../src/services/engine-client.js');
-    const client = new EngineClient('https://engine.example.com', 'engine-key');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', undefined, 45000);
 
     await expect(client.sendTextMessage('user-1', 'hello')).resolves.toMatchObject({
       message: 'first part\nsecond part',
@@ -158,51 +131,43 @@ describe('EngineClient', () => {
   });
 
   it('retries on concurrent request rejection using retry_after_ms', async () => {
-    create.mockReturnValue({ post, get, put });
-    post
-      .mockRejectedValueOnce({
-        isAxiosError: true,
-        response: {
-          status: 429,
-          data: { retry_after_ms: 1 },
-          headers: {},
-        },
-      })
-      .mockResolvedValueOnce({ data: { response: 'ok' } });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ retry_after_ms: 1 }, 429))
+      .mockResolvedValueOnce(jsonResponse({ response: 'ok' }));
 
-    const { EngineClient } = await import('../../src/services/engine-client.js');
-    const client = new EngineClient('https://engine.example.com', 'engine-key');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', undefined, 45000);
 
-    await expect(client.sendTextMessage('user-1', 'hello')).resolves.toMatchObject({ message: 'ok' });
-    expect(post).toHaveBeenCalledTimes(2);
+    await expect(client.sendTextMessage('user-1', 'hello')).resolves.toMatchObject({
+      message: 'ok',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('resets private conversation history', async () => {
-    create.mockReturnValue({ post, get, put, delete: vi.fn().mockResolvedValue({ data: {} }) });
-    const del = vi.fn().mockResolvedValue({ data: {} });
-    create.mockReturnValue({ post, get, put, delete: del });
+    fetchMock.mockResolvedValue(jsonResponse({}));
 
-    const { EngineClient } = await import('../../src/services/engine-client.js');
-    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
 
     await client.resetConversation('user-1', { chatType: 'private' });
 
-    expect(del).toHaveBeenCalledWith('/api/v1/orgs/org-1/users/user-1/history', {
-      data: { org: 'org-1' },
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://engine.example.com/api/v1/orgs/org-1/users/user-1/history',
+      expect.objectContaining({ method: 'DELETE' })
+    );
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body).toEqual({ org: 'org-1' });
   });
 
   it('resets group conversation history', async () => {
-    const del = vi.fn().mockResolvedValue({ data: {} });
-    create.mockReturnValue({ post, get, put, delete: del });
+    fetchMock.mockResolvedValue(jsonResponse({}));
 
-    const { EngineClient } = await import('../../src/services/engine-client.js');
-    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1');
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
 
     await client.resetConversation('user-1', { chatType: 'group', chatId: 'chat-99' });
 
-    expect(del).toHaveBeenCalledWith('/api/v1/admin/orgs/org-1/groups/chat-99/history', {
-      data: { org: 'org-1' },
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://engine.example.com/api/v1/admin/orgs/org-1/groups/chat-99/history',
+      expect.objectContaining({ method: 'DELETE' })
+    );
   });
 });

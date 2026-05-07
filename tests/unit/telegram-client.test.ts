@@ -1,112 +1,111 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-process.env.TELEGRAM_BOT_TOKEN = 'telegram-token';
-process.env.ENGINE_BASE_URL = 'https://engine.example.com';
-process.env.ENGINE_API_KEY = 'engine-key';
-process.env.GATEWAY_PUBLIC_URL = 'https://gateway.example.com';
-process.env.TELEGRAM_TIMEOUT_MS = '15000';
-
-const post = vi.fn();
-const create = vi.fn();
-
-vi.mock('axios', async () => {
-  const actual = await vi.importActual<typeof import('axios')>('axios');
-  return {
-    ...actual,
-    default: {
-      create,
-      isAxiosError: actual.isAxiosError,
-    },
-  };
-});
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TelegramClient } from '../../src/telegram/client.js';
 
 describe('TelegramClient', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+  });
+
   afterEach(() => {
-    post.mockReset();
-    create.mockReset();
-    vi.resetModules();
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
   it('sends a text message', async () => {
-    create.mockReturnValue({ post });
-    post.mockResolvedValue({ data: { ok: true, result: { message_id: 1 } } });
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }))
+    );
 
-    const { TelegramClient } = await import('../../src/telegram/client.js');
-    const client = new TelegramClient('bot-token');
+    const client = new TelegramClient('bot-token', 15000);
 
     await expect(client.sendTextMessage('123', 'hello')).resolves.toBe(true);
-    expect(post).toHaveBeenCalledWith('/sendMessage', {
-      chat_id: '123',
-      text: 'hello',
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.telegram.org/botbot-token/sendMessage',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ chat_id: '123', text: 'hello' }),
+      })
+    );
   });
 
   it('sends a text message to a topic thread when provided', async () => {
-    create.mockReturnValue({ post });
-    post.mockResolvedValue({ data: { ok: true, result: { message_id: 1 } } });
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }))
+    );
 
-    const { TelegramClient } = await import('../../src/telegram/client.js');
-    const client = new TelegramClient('bot-token');
+    const client = new TelegramClient('bot-token', 15000);
 
     await expect(client.sendTextMessage('123', 'hello', 'HTML', '7')).resolves.toBe(true);
-    expect(post).toHaveBeenCalledWith('/sendMessage', {
-      chat_id: '123',
-      text: 'hello',
-      parse_mode: 'HTML',
-      message_thread_id: 7,
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.telegram.org/botbot-token/sendMessage',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          chat_id: '123',
+          text: 'hello',
+          parse_mode: 'HTML',
+          message_thread_id: 7,
+        }),
+      })
+    );
   });
 
   it('sends chat actions', async () => {
-    create.mockReturnValue({ post });
-    post.mockResolvedValue({ data: { ok: true, result: true } });
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true, result: true })));
 
-    const { TelegramClient } = await import('../../src/telegram/client.js');
-    const client = new TelegramClient('bot-token');
+    const client = new TelegramClient('bot-token', 15000);
 
     await expect(client.sendChatAction('123', 'typing')).resolves.toBe(true);
-    expect(post).toHaveBeenCalledWith('/sendChatAction', {
-      chat_id: '123',
-      action: 'typing',
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.telegram.org/botbot-token/sendChatAction',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ chat_id: '123', action: 'typing' }),
+      })
+    );
   });
 
   it('sends chat actions to a topic thread when provided', async () => {
-    create.mockReturnValue({ post });
-    post.mockResolvedValue({ data: { ok: true, result: true } });
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true, result: true })));
 
-    const { TelegramClient } = await import('../../src/telegram/client.js');
-    const client = new TelegramClient('bot-token');
+    const client = new TelegramClient('bot-token', 15000);
 
     await expect(client.sendChatAction('123', 'typing', '7')).resolves.toBe(true);
-    expect(post).toHaveBeenCalledWith('/sendChatAction', {
-      chat_id: '123',
-      action: 'typing',
-      message_thread_id: 7,
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.telegram.org/botbot-token/sendChatAction',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ chat_id: '123', action: 'typing', message_thread_id: 7 }),
+      })
+    );
   });
 
   it('sets webhook with secret token when provided', async () => {
-    create.mockReturnValue({ post });
-    post.mockResolvedValue({ data: { ok: true, result: { url: 'https://example.com' } } });
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, result: { url: 'https://example.com' } }))
+    );
 
-    const { TelegramClient } = await import('../../src/telegram/client.js');
-    const client = new TelegramClient('bot-token');
+    const client = new TelegramClient('bot-token', 15000);
 
     await expect(client.setWebhook('https://example.com', 'secret')).resolves.toBe(true);
-    expect(post).toHaveBeenCalledWith('/setWebhook', {
-      url: 'https://example.com',
-      secret_token: 'secret',
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.telegram.org/botbot-token/setWebhook',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ url: 'https://example.com', secret_token: 'secret' }),
+      })
+    );
   });
 
   it('returns false on HTTP errors', async () => {
-    create.mockReturnValue({ post });
-    post.mockRejectedValue(new Error('boom'));
+    fetchMock.mockRejectedValue(new Error('boom'));
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    const { TelegramClient } = await import('../../src/telegram/client.js');
-    const client = new TelegramClient('bot-token');
+    const client = new TelegramClient('bot-token', 15000);
 
     await expect(client.sendTextMessage('123', 'hello')).resolves.toBe(false);
     expect(errorSpy).toHaveBeenCalled();

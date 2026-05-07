@@ -29,8 +29,8 @@ describe('gateway integration smoke', () => {
       });
     });
 
-    const telegramClient = new TelegramClient('bot-token', telegramServer.baseUrl);
-    const engineClient = new EngineClient(engineServer.baseUrl, 'engine-key', 'org-1');
+    const telegramClient = new TelegramClient('bot-token', 15000, telegramServer.baseUrl);
+    const engineClient = new EngineClient(engineServer.baseUrl, 'engine-key', 'org-1', 45000);
 
     try {
       const result = await handleIncomingMessage(
@@ -52,7 +52,6 @@ describe('gateway integration smoke', () => {
         {
           telegramClient,
           engineClient,
-          progressThrottleSeconds: 3,
         }
       );
 

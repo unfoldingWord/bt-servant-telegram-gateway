@@ -3,22 +3,14 @@ import { EngineClient, type EngineMessageContext, type ChatResponse } from './en
 export interface FinalReplyRequest {
   userId: string;
   message: string;
-  context?: EngineMessageContext;
-  progressCallbackUrl?: string;
-  progressThrottleSeconds?: number;
+  context?: EngineMessageContext | undefined;
 }
 
 export class EngineGateway {
-  constructor(private readonly client: EngineClient = new EngineClient()) {}
+  constructor(private readonly client: EngineClient) {}
 
   async requestFinalReply(request: FinalReplyRequest): Promise<ChatResponse> {
-    return this.client.sendTextMessage(
-      request.userId,
-      request.message,
-      request.context ?? {},
-      request.progressCallbackUrl,
-      request.progressThrottleSeconds
-    );
+    return this.client.sendTextMessage(request.userId, request.message, request.context ?? {});
   }
 
   async resetConversation(

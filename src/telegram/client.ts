@@ -1,33 +1,23 @@
-import axios, { AxiosError, type AxiosInstance } from 'axios';
-
-import { config } from '../config/index.js';
-
 type TelegramParseMode = 'Markdown' | 'MarkdownV2' | 'HTML';
-type TelegramChatAction = 'typing' | 'upload_photo' | 'record_video' | 'upload_video' | 'record_voice' | 'upload_voice' | 'upload_document' | 'find_location' | 'record_video_note' | 'upload_video_note';
-
-interface TelegramApiResponse<T> {
-  ok: boolean;
-  result: T;
-}
-
-interface TelegramSendMessageResult {
-  message_id: number;
-}
-
-interface TelegramWebhookInfo {
-  url: string;
-  has_custom_certificate: boolean;
-  pending_update_count: number;
-}
+type TelegramChatAction =
+  | 'typing'
+  | 'upload_photo'
+  | 'record_video'
+  | 'upload_video'
+  | 'record_voice'
+  | 'upload_voice'
+  | 'upload_document'
+  | 'find_location'
+  | 'record_video_note'
+  | 'upload_video_note';
 
 export class TelegramClient {
-  private readonly http: AxiosInstance;
+  private readonly baseUrl: string;
+  private readonly timeoutMs: number;
 
-  constructor(botToken: string = config.telegramBotToken, baseUrl: string = `https://api.telegram.org/bot${botToken}`) {
-    this.http = axios.create({
-      baseURL: baseUrl,
-      timeout: config.telegramTimeoutMs,
-    });
+  constructor(botToken: string, timeoutMs: number, baseUrl?: string) {
+    this.baseUrl = baseUrl ?? `https://api.telegram.org/bot${botToken}`;
+    this.timeoutMs = timeoutMs;
   }
 
   async sendTextMessage(
@@ -36,39 +26,12 @@ export class TelegramClient {
     parseMode?: TelegramParseMode,
     messageThreadId?: string
   ): Promise<boolean> {
-    const startedAt = Date.now();
-    console.info('Telegram sendTextMessage start', {
-      chatId,
-      threadId: messageThreadId,
-      parseMode,
-      textLength: text.length,
-      timeoutMs: config.telegramTimeoutMs,
+    return this.post('sendTextMessage', '/sendMessage', {
+      chat_id: chatId,
+      text,
+      ...(parseMode ? { parse_mode: parseMode } : {}),
+      ...(messageThreadId ? { message_thread_id: Number.parseInt(messageThreadId, 10) } : {}),
     });
-    try {
-      const response = await this.http.post<TelegramApiResponse<TelegramSendMessageResult>>('/sendMessage', {
-        chat_id: chatId,
-        text,
-        ...(parseMode ? { parse_mode: parseMode } : {}),
-        ...(messageThreadId ? { message_thread_id: Number.parseInt(messageThreadId, 10) } : {}),
-      });
-      console.info('Telegram sendTextMessage success', {
-        chatId,
-        threadId: messageThreadId,
-        durationMs: Date.now() - startedAt,
-        ok: response.data?.ok,
-      });
-      return true;
-    } catch (error) {
-      this.logHttpError('sendTextMessage', error, {
-        chatId,
-        threadId: messageThreadId ?? '',
-        parseMode: parseMode ?? '',
-        textLength: String(text.length),
-        timeoutMs: String(config.telegramTimeoutMs),
-        durationMs: String(Date.now() - startedAt),
-      });
-      return false;
-    }
   }
 
   async sendChatAction(
@@ -76,105 +39,66 @@ export class TelegramClient {
     action: TelegramChatAction,
     messageThreadId?: string
   ): Promise<boolean> {
-    const startedAt = Date.now();
-    console.info('Telegram sendChatAction start', {
-      chatId,
-      threadId: messageThreadId,
+    return this.post('sendChatAction', '/sendChatAction', {
+      chat_id: chatId,
       action,
-      timeoutMs: config.telegramTimeoutMs,
+      ...(messageThreadId ? { message_thread_id: Number.parseInt(messageThreadId, 10) } : {}),
     });
-    try {
-      const response = await this.http.post<TelegramApiResponse<boolean>>('/sendChatAction', {
-        chat_id: chatId,
-        action,
-        ...(messageThreadId ? { message_thread_id: Number.parseInt(messageThreadId, 10) } : {}),
-      });
-      console.info('Telegram sendChatAction success', {
-        chatId,
-        threadId: messageThreadId,
-        action,
-        durationMs: Date.now() - startedAt,
-        ok: response.data?.ok,
-      });
-      return true;
-    } catch (error) {
-      this.logHttpError('sendChatAction', error, {
-        chatId,
-        threadId: messageThreadId ?? '',
-        action,
-        timeoutMs: String(config.telegramTimeoutMs),
-        durationMs: String(Date.now() - startedAt),
-      });
-      return false;
-    }
   }
 
-  async setWebhook(url: string, secretToken: string = config.webhookSecretToken || ''): Promise<boolean> {
-    const startedAt = Date.now();
-    console.info('Telegram setWebhook start', {
+  async setWebhook(url: string, secretToken?: string): Promise<boolean> {
+    return this.post('setWebhook', '/setWebhook', {
       url,
-      hasSecretToken: Boolean(secretToken),
+      ...(secretToken ? { secret_token: secretToken } : {}),
+    });
+  }
+
+  private async post(
+    operation: string,
+    path: string,
+    body: Record<string, unknown>
+  ): Promise<boolean> {
+    const startedAt = Date.now();
+    console.info(`Telegram ${operation} start`, {
+      timeoutMs: this.timeoutMs,
+      ...summarizeBody(body),
     });
     try {
-      const response = await this.http.post<TelegramApiResponse<TelegramWebhookInfo>>('/setWebhook', {
-        url,
-        ...(secretToken ? { secret_token: secretToken } : {}),
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
-      console.info('Telegram setWebhook success', {
-        url,
-        hasSecretToken: Boolean(secretToken),
+
+      const data = (await response.json()) as { ok?: boolean };
+      console.info(`Telegram ${operation} success`, {
         durationMs: Date.now() - startedAt,
-        ok: response.data?.ok,
+        status: response.status,
+        ok: data.ok,
       });
-      return true;
+      return response.ok;
     } catch (error) {
-      this.logHttpError('setWebhook', error, {
-        url,
-        hasSecretToken: String(Boolean(secretToken)),
-        durationMs: String(Date.now() - startedAt),
+      console.error(`Telegram ${operation} failed`, {
+        ...summarizeBody(body),
+        timeoutMs: this.timeoutMs,
+        durationMs: Date.now() - startedAt,
+        message: error instanceof Error ? error.message : 'Unknown error',
+        isTimeout: error instanceof Error && error.name === 'TimeoutError',
       });
       return false;
     }
-  }
-
-  private logHttpError(operation: string, error: unknown, context: Record<string, string>): void {
-    if (axios.isAxiosError(error)) {
-      const axiosError = error as AxiosError;
-      const status = axiosError.response?.status;
-      const data = summarizeResponseData(axiosError.response?.data);
-      console.error(`Telegram ${operation} failed`, {
-        ...context,
-        status,
-        data,
-        message: axiosError.message,
-        code: axiosError.code,
-        configTimeout: axiosError.config?.timeout,
-        url: axiosError.config?.url,
-      });
-      return;
-    }
-
-    console.error(`Telegram ${operation} failed`, {
-      ...context,
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
   }
 }
 
-function summarizeResponseData(data: unknown): unknown {
-  if (!data || typeof data !== 'object') {
-    return data;
-  }
-
-  if (Array.isArray(data)) {
-    return {
-      type: 'array',
-      length: data.length,
-      firstKeys: data[0] && typeof data[0] === 'object' ? Object.keys(data[0] as Record<string, unknown>) : [],
-    };
-  }
-
-  return {
-    keys: Object.keys(data as Record<string, unknown>),
-  };
+function summarizeBody(body: Record<string, unknown>): Record<string, unknown> {
+  const summary: Record<string, unknown> = {};
+  if (body.chat_id) summary.chatId = body.chat_id;
+  if (body.action) summary.action = body.action;
+  if (body.url) summary.url = body.url;
+  if (body.message_thread_id) summary.threadId = String(body.message_thread_id);
+  if (body.parse_mode) summary.parseMode = body.parse_mode;
+  if (typeof body.text === 'string') summary.textLength = body.text.length;
+  if (body.secret_token) summary.hasSecretToken = true;
+  return summary;
 }

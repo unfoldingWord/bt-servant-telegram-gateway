@@ -49,7 +49,9 @@ function extractProgressText(payload: unknown): string {
     const response = candidate.response as Record<string, unknown>;
     const responses = response.responses;
     if (Array.isArray(responses)) {
-      const first = responses.find((item): item is string => typeof item === 'string' && item.trim().length > 0);
+      const first = responses.find(
+        (item): item is string => typeof item === 'string' && item.trim().length > 0
+      );
       if (first) {
         return first.trim();
       }

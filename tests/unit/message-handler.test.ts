@@ -1,10 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-process.env.TELEGRAM_BOT_TOKEN = 'telegram-token';
-process.env.ENGINE_BASE_URL = 'https://engine.example.com';
-process.env.ENGINE_API_KEY = 'engine-key';
-process.env.GATEWAY_PUBLIC_URL = 'https://gateway.example.com';
-
 import { MessageType } from '../../src/core/models.js';
 import { formatTelegramHtml } from '../../src/services/telegram-format.js';
 
@@ -46,24 +41,17 @@ describe('handleIncomingMessage', () => {
       {
         telegramClient: telegramClient as never,
         engineClient: engineClient as never,
-        progressThrottleSeconds: 3,
       }
     );
 
     expect(telegramClient.sendChatAction).toHaveBeenCalledWith('2002', 'typing');
-    expect(engineClient.sendTextMessage).toHaveBeenCalledWith(
-      '1001',
-      'hello',
-      {
-        chatType: 'private',
-        chatId: '2002',
-        speaker: 'Alex',
-        threadId: undefined,
-        responseLanguageHint: undefined,
-      },
-      undefined,
-      3
-    );
+    expect(engineClient.sendTextMessage).toHaveBeenCalledWith('1001', 'hello', {
+      chatType: 'private',
+      chatId: '2002',
+      speaker: 'Alex',
+      threadId: undefined,
+      responseLanguageHint: undefined,
+    });
     expect(telegramClient.sendTextMessage).toHaveBeenCalledTimes(3);
     expect(result).toEqual({ handled: true, sentChunks: 3 });
   });
@@ -359,7 +347,10 @@ describe('handleIncomingMessage', () => {
       chatId: '2002',
       threadId: undefined,
     });
-    expect(telegramClient.sendTextMessage).toHaveBeenCalledWith('2002', 'Conversation has been reset.');
+    expect(telegramClient.sendTextMessage).toHaveBeenCalledWith(
+      '2002',
+      'Conversation has been reset.'
+    );
     expect(result).toEqual({ handled: true, reason: 'reset', sentChunks: 1 });
     expect(engineClient.sendTextMessage).not.toHaveBeenCalled();
   });
@@ -451,5 +442,4 @@ describe('handleIncomingMessage', () => {
     expect(engineClient.updateUserPreferences).not.toHaveBeenCalled();
     expect(result).toEqual({ handled: true, sentChunks: 1 });
   });
-
 });

@@ -1,0 +1,40 @@
+name = "bt-servant-telegram-gateway"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+account_id = "5a3ffd86280d3ed086be76d955829242"
+
+[observability]
+enabled = true
+
+[observability.logs]
+head_sampling_rate = 1
+
+[vars]
+ENVIRONMENT = "production"
+ENGINE_BASE_URL = "https://api.btservant.ai"
+ENGINE_ORG = "unfoldingWord"
+ENGINE_TIMEOUT_MS = "45000"
+TELEGRAM_TIMEOUT_MS = "15000"
+PROGRESS_THROTTLE_SECONDS = "3"
+MESSAGE_AGE_CUTOFF_IN_SECONDS = "3600"
+LOG_LEVEL = "INFO"
+
+# Secrets (set via `wrangler secret put`):
+# TELEGRAM_BOT_TOKEN
+# TELEGRAM_BOT_USERNAME
+# WEBHOOK_SECRET_TOKEN
+# ENGINE_API_KEY
+# GATEWAY_PUBLIC_URL
+
+[env.staging]
+name = "bt-servant-telegram-gateway-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+ENGINE_BASE_URL = "https://api.btservant.ai"
+ENGINE_ORG = "unfoldingWord"
+ENGINE_TIMEOUT_MS = "45000"
+TELEGRAM_TIMEOUT_MS = "15000"
+PROGRESS_THROTTLE_SECONDS = "3"
+MESSAGE_AGE_CUTOFF_IN_SECONDS = "3600"
+LOG_LEVEL = "DEBUG"

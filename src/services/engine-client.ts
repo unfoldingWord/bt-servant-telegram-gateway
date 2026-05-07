@@ -1,7 +1,3 @@
-import axios, { AxiosError, type AxiosInstance } from 'axios';
-
-import { config } from '../config/index.js';
-
 export interface ChatResponse {
   message: string;
   message_key?: string;
@@ -14,8 +10,8 @@ export interface UserPreferences {
 
 export interface ResetConversationOptions {
   chatType: 'private' | 'group' | 'supergroup';
-  chatId?: string;
-  threadId?: string;
+  chatId?: string | undefined;
+  threadId?: string | undefined;
 }
 
 export interface EngineChatRequest {
@@ -32,11 +28,11 @@ export interface EngineChatRequest {
 }
 
 export interface EngineMessageContext {
-  chatType?: 'private' | 'group' | 'supergroup';
-  chatId?: string;
-  speaker?: string;
-  threadId?: string;
-  responseLanguageHint?: string;
+  chatType?: 'private' | 'group' | 'supergroup' | undefined;
+  chatId?: string | undefined;
+  speaker?: string | undefined;
+  threadId?: string | undefined;
+  responseLanguageHint?: string | undefined;
 }
 
 interface EngineChatApiResponse {
@@ -58,56 +54,31 @@ interface EnginePreferencesApiResponse {
   [key: string]: unknown;
 }
 
-interface RequestContext {
-  operation: string;
-  path: string;
-  userId?: string;
-}
-
 export class EngineClient {
-  private readonly http: AxiosInstance;
+  private readonly baseUrl: string;
+  private readonly headers: Record<string, string>;
+  private readonly timeoutMs: number;
 
   constructor(
-    baseUrl: string = config.engineBaseUrl,
-    apiKey: string = config.engineApiKey,
-    private readonly org: string | undefined = config.engineOrg,
-    timeoutMs: number = config.engineTimeoutMs
+    baseUrl: string,
+    apiKey: string,
+    private readonly org: string | undefined,
+    timeoutMs: number
   ) {
-    this.http = axios.create({
-      baseURL: baseUrl,
-      timeout: timeoutMs,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-    });
+    this.baseUrl = baseUrl;
+    this.headers = {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    };
+    this.timeoutMs = timeoutMs;
   }
 
   async sendTextMessage(
     userId: string,
     message: string,
-    progressCallbackUrl?: string,
-    progressThrottleSeconds?: number
-  ): Promise<ChatResponse>;
-  async sendTextMessage(
-    userId: string,
-    message: string,
-    context: EngineMessageContext,
-    progressCallbackUrl?: string,
-    progressThrottleSeconds?: number
-  ): Promise<ChatResponse>;
-  async sendTextMessage(
-    userId: string,
-    message: string,
-    contextOrProgressCallbackUrl?: string | EngineMessageContext,
-    progressCallbackUrlOrThrottleSeconds?: string | number,
-    progressThrottleSeconds: number = config.progressThrottleSeconds
+    context: EngineMessageContext = {}
   ): Promise<ChatResponse> {
     const startedAt = Date.now();
-    const context = typeof contextOrProgressCallbackUrl === 'string' || contextOrProgressCallbackUrl === undefined
-      ? {}
-      : contextOrProgressCallbackUrl;
-    void progressCallbackUrlOrThrottleSeconds;
-    void progressThrottleSeconds;
 
     const payload: EngineChatRequest = {
       client_id: 'telegram-gateway',
@@ -118,7 +89,9 @@ export class EngineClient {
       ...(context.chatId ? { chat_id: context.chatId } : {}),
       ...(context.speaker ? { speaker: context.speaker } : {}),
       ...(context.threadId ? { thread_id: context.threadId } : {}),
-      ...(context.responseLanguageHint ? { response_language_hint: context.responseLanguageHint } : {}),
+      ...(context.responseLanguageHint
+        ? { response_language_hint: context.responseLanguageHint }
+        : {}),
       ...(this.org ? { org: this.org } : {}),
     };
 
@@ -131,38 +104,20 @@ export class EngineClient {
       responseLanguageHint: context.responseLanguageHint,
       org: this.org,
       messageLength: message.length,
-      timeoutMs: config.engineTimeoutMs,
+      timeoutMs: this.timeoutMs,
     });
 
-    try {
-      const response = await this.http.post<EngineChatApiResponse>('/api/v1/chat', payload);
-      console.info('Engine chat response received', {
-        userId,
-        durationMs: Date.now() - startedAt,
-        responseKeys: summarizeResponseKeys(response.data),
-      });
-      return this.mapChatResponse(response.data);
-    } catch (error) {
-      const retryDelay = this.getRetryDelayMs(error);
-      if (retryDelay !== null) {
-        console.info('Engine sendTextMessage retry scheduled', {
-          userId,
-          retryDelayMs: retryDelay,
-          durationMs: Date.now() - startedAt,
-        });
-        await this.sleep(retryDelay);
-        const response = await this.http.post<EngineChatApiResponse>('/api/v1/chat', payload);
-        console.info('Engine chat response received after retry', {
-          userId,
-          durationMs: Date.now() - startedAt,
-          responseKeys: summarizeResponseKeys(response.data),
-        });
-        return this.mapChatResponse(response.data);
-      }
+    const path = '/api/v1/chat';
+    const response = await this.fetchWithRetry(path, 'POST', payload, userId, startedAt);
+    const data = (await response.json()) as EngineChatApiResponse;
 
-      this.logHttpError({ operation: 'sendTextMessage', path: '/api/v1/chat', userId }, error);
-      throw error;
-    }
+    console.info('Engine chat response received', {
+      userId,
+      durationMs: Date.now() - startedAt,
+      responseKeys: summarizeResponseKeys(data),
+    });
+
+    return this.mapChatResponse(data);
   }
 
   async getUserPreferences(userId: string): Promise<UserPreferences> {
@@ -172,19 +127,16 @@ export class EngineClient {
       userId,
       path,
       org: this.org,
-      timeoutMs: config.engineTimeoutMs,
+      timeoutMs: this.timeoutMs,
     });
     try {
-      const response = await this.http.get<EnginePreferencesApiResponse>(path);
-      console.info('Engine getUserPreferences success', {
-        userId,
-        path,
-        durationMs: Date.now() - startedAt,
-        preferenceKeys: summarizeResponseKeys(response.data),
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'GET',
+        headers: this.headers,
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
-      return this.mapPreferencesResponse(response.data);
-    } catch (error) {
-      if (this.isNotFound(error)) {
+
+      if (response.status === 404) {
         console.info('Engine getUserPreferences not found', {
           userId,
           path,
@@ -193,35 +145,62 @@ export class EngineClient {
         return {};
       }
 
-      this.logHttpError({ operation: 'getUserPreferences', path, userId }, error);
+      if (!response.ok) {
+        throw new Error(`Engine API error: ${response.status}`);
+      }
+
+      const data = (await response.json()) as EnginePreferencesApiResponse;
+      console.info('Engine getUserPreferences success', {
+        userId,
+        path,
+        durationMs: Date.now() - startedAt,
+        preferenceKeys: summarizeResponseKeys(data),
+      });
+      return this.mapPreferencesResponse(data);
+    } catch (error) {
+      this.logError('getUserPreferences', path, userId, error);
       throw error;
     }
   }
 
-  async updateUserPreferences(userId: string, preferences: UserPreferences): Promise<UserPreferences> {
+  async updateUserPreferences(
+    userId: string,
+    preferences: UserPreferences
+  ): Promise<UserPreferences> {
     const path = this.preferencesPath(userId);
     const startedAt = Date.now();
     console.info('Engine updateUserPreferences start', {
       userId,
       path,
       org: this.org,
-      timeoutMs: config.engineTimeoutMs,
+      timeoutMs: this.timeoutMs,
       preferenceKeys: Object.keys(preferences ?? {}),
     });
     try {
-      const response = await this.http.put<EnginePreferencesApiResponse>(path, {
-        preferences,
-        ...(this.org ? { org: this.org } : {}),
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'PUT',
+        headers: this.headers,
+        body: JSON.stringify({
+          preferences,
+          ...(this.org ? { org: this.org } : {}),
+        }),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
+
+      if (!response.ok) {
+        throw new Error(`Engine API error: ${response.status}`);
+      }
+
+      const data = (await response.json()) as EnginePreferencesApiResponse;
       console.info('Engine updateUserPreferences success', {
         userId,
         path,
         durationMs: Date.now() - startedAt,
-        preferenceKeys: summarizeResponseKeys(response.data),
+        preferenceKeys: summarizeResponseKeys(data),
       });
-      return this.mapPreferencesResponse(response.data);
+      return this.mapPreferencesResponse(data);
     } catch (error) {
-      this.logHttpError({ operation: 'updateUserPreferences', path, userId }, error);
+      this.logError('updateUserPreferences', path, userId, error);
       throw error;
     }
   }
@@ -236,28 +215,123 @@ export class EngineClient {
       chatType: options.chatType,
       chatId: options.chatId,
       threadId: options.threadId,
-      timeoutMs: config.engineTimeoutMs,
+      timeoutMs: this.timeoutMs,
     });
     try {
-      const response = await this.http.delete(path, {
-        data: {
-          ...(this.org ? { org: this.org } : {}),
-        },
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'DELETE',
+        headers: this.headers,
+        body: JSON.stringify({ ...(this.org ? { org: this.org } : {}) }),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
+
+      if (!response.ok) {
+        throw new Error(`Engine API error: ${response.status}`);
+      }
+
+      const data = await response.json();
       console.info('Engine resetConversation success', {
         userId,
         path,
         durationMs: Date.now() - startedAt,
-        responseKeys: summarizeResponseKeys(response.data),
+        responseKeys: summarizeResponseKeys(data),
       });
     } catch (error) {
-      this.logHttpError({ operation: 'resetConversation', path, userId }, error);
+      this.logError('resetConversation', path, userId, error);
       throw error;
     }
   }
 
+  private async fetchWithRetry(
+    path: string,
+    method: string,
+    payload: unknown,
+    userId: string,
+    startedAt: number
+  ): Promise<Response> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers: this.headers,
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+
+    if (response.status === 429) {
+      const retryDelay = await this.getRetryDelayMs(response);
+      console.info('Engine sendTextMessage retry scheduled', {
+        userId,
+        retryDelayMs: retryDelay,
+        durationMs: Date.now() - startedAt,
+      });
+      await this.sleep(retryDelay);
+      const retryResponse = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers: this.headers,
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      if (!retryResponse.ok) {
+        throw new Error(`Engine API error after retry: ${retryResponse.status}`);
+      }
+
+      const retryData = (await retryResponse.json()) as EngineChatApiResponse;
+      console.info('Engine chat response received after retry', {
+        userId,
+        durationMs: Date.now() - startedAt,
+        responseKeys: summarizeResponseKeys(retryData),
+      });
+      return new Response(JSON.stringify(retryData), {
+        status: retryResponse.status,
+        headers: retryResponse.headers,
+      });
+    }
+
+    if (!response.ok) {
+      this.logError(
+        'sendTextMessage',
+        path,
+        userId,
+        new Error(`Engine API error: ${response.status}`)
+      );
+      throw new Error(`Engine API error: ${response.status}`);
+    }
+
+    return response;
+  }
+
+  private async getRetryDelayMs(response: Response): Promise<number> {
+    try {
+      const data = (await response.clone().json()) as {
+        retry_after_ms?: number;
+        retry_after?: number;
+      };
+
+      if (typeof data.retry_after_ms === 'number') {
+        return data.retry_after_ms;
+      }
+
+      if (typeof data.retry_after === 'number') {
+        return data.retry_after * 1000;
+      }
+    } catch {
+      // body parse failed — fall through to header check
+    }
+
+    const retryAfterHeader = response.headers.get('retry-after');
+    if (retryAfterHeader) {
+      const seconds = Number.parseFloat(retryAfterHeader);
+      if (!Number.isNaN(seconds)) {
+        return seconds * 1000;
+      }
+    }
+
+    return 1000;
+  }
+
   private preferencesPath(userId: string): string {
-    return `/api/v1/orgs/${encodeURIComponent(this.org ?? 'DEFAULT_ORG')}/users/${encodeURIComponent(userId)}/preferences`;
+    const org = encodeURIComponent(this.org ?? 'DEFAULT_ORG');
+    return `/api/v1/orgs/${org}/users/${encodeURIComponent(userId)}/preferences`;
   }
 
   private resetPath(userId: string, options: ResetConversationOptions): string {
@@ -277,111 +351,59 @@ export class EngineClient {
   private mapChatResponse(data: unknown): ChatResponse {
     const message = this.extractMessage(data);
 
-    if (Array.isArray(data)) {
-      return {
-        message,
-        raw_response: data,
-      };
+    if (Array.isArray(data) || !data || typeof data !== 'object') {
+      return { message, raw_response: data };
     }
 
-    if (!data || typeof data !== 'object') {
-      return {
-        message,
-        raw_response: data,
-      };
-    }
-
-    const responseData = data as EngineChatApiResponse;
-    return {
-        message,
-      ...responseData,
-    };
+    return { message, ...(data as EngineChatApiResponse) };
   }
 
   private extractMessage(data: unknown): string {
-    if (!data) {
-      return '';
-    }
+    if (!data) return '';
+    if (Array.isArray(data)) return this.extractResponsesText(data);
+    if (typeof data !== 'object') return typeof data === 'string' ? data.trim() : '';
 
-    if (Array.isArray(data)) {
-      return this.extractResponsesText(data);
-    }
+    const d = data as EngineChatApiResponse;
+    const fromResponses = this.extractResponsesText(d.responses);
+    if (fromResponses) return fromResponses;
 
-    if (typeof data !== 'object') {
-      return typeof data === 'string' ? data.trim() : '';
-    }
+    const direct = d.response ?? d.message ?? d.text ?? d.reply ?? d.output ?? d.result;
+    if (typeof direct === 'string' && direct.trim()) return direct;
 
-    const responseData = data as EngineChatApiResponse;
-    const responseText = this.extractResponsesText(responseData.responses);
-    if (responseText) {
-      return responseText;
-    }
-
-    const directMessage =
-      responseData.response ??
-      responseData.message ??
-      responseData.text ??
-      responseData.reply ??
-      responseData.output ??
-      responseData.result;
-
-    if (typeof directMessage === 'string' && directMessage.trim()) {
-      return directMessage;
-    }
-
-    if (responseData.data && typeof responseData.data === 'object') {
-      return this.extractMessage(responseData.data);
-    }
-
+    if (d.data && typeof d.data === 'object') return this.extractMessage(d.data);
     return '';
   }
 
   private extractResponsesText(responses: unknown): string {
-    if (typeof responses === 'string') {
-      return responses.trim();
-    }
+    if (typeof responses === 'string') return responses.trim();
+    if (!Array.isArray(responses)) return '';
 
-    if (!Array.isArray(responses)) {
-      return '';
-    }
-
-    const parts = responses
+    return responses
       .flatMap((item) => this.extractResponseItemText(item))
       .map((part) => part.trim())
-      .filter((part) => part.length > 0);
-
-    return parts.join('\n').trim();
+      .filter((part) => part.length > 0)
+      .join('\n')
+      .trim();
   }
 
   private extractResponseItemText(item: unknown): string[] {
-    if (typeof item === 'string') {
-      return [item];
-    }
-
-    if (!item || typeof item !== 'object') {
-      return [];
-    }
+    if (typeof item === 'string') return [item];
+    if (!item || typeof item !== 'object') return [];
 
     const candidate = item as Record<string, unknown>;
     const values: string[] = [];
 
     for (const key of ['text', 'message', 'response', 'output', 'result']) {
       const value = candidate[key];
-      if (typeof value === 'string' && value.trim()) {
-        values.push(value);
-      }
+      if (typeof value === 'string' && value.trim()) values.push(value);
     }
 
-    if (values.length > 0) {
-      return values;
-    }
+    if (values.length > 0) return values;
 
     for (const key of ['responses', 'data']) {
       const value = candidate[key];
       const nested = this.extractResponsesText(value);
-      if (nested) {
-        return [nested];
-      }
+      if (nested) return [nested];
     }
 
     return [];
@@ -391,60 +413,10 @@ export class EngineClient {
     return data.prefs ?? data.preferences ?? {};
   }
 
-  private getRetryDelayMs(error: unknown): number | null {
-    if (!axios.isAxiosError(error)) {
-      return null;
-    }
-
-    const status = error.response?.status;
-    const payload = error.response?.data as { retry_after_ms?: number; retry_after?: number } | undefined;
-    if (status !== 429) {
-      return null;
-    }
-
-    if (typeof payload?.retry_after_ms === 'number') {
-      return payload.retry_after_ms;
-    }
-
-    if (typeof payload?.retry_after === 'number') {
-      return payload.retry_after * 1000;
-    }
-
-    const headers = error.response?.headers as Record<string, string | number | string[]> | undefined;
-    const retryAfterHeader = headers?.['retry-after'];
-    if (typeof retryAfterHeader === 'string') {
-      const seconds = Number.parseFloat(retryAfterHeader);
-      if (!Number.isNaN(seconds)) {
-        return seconds * 1000;
-      }
-    }
-
-    return 1000;
-  }
-
-  private isNotFound(error: unknown): boolean {
-    return axios.isAxiosError(error) && error.response?.status === 404;
-  }
-
-  private logHttpError(context: RequestContext, error: unknown): void {
-    if (axios.isAxiosError(error)) {
-      const axiosError = error as AxiosError;
-      console.error(`Engine ${context.operation} failed`, {
-        path: context.path,
-        userId: context.userId,
-        status: axiosError.response?.status,
-        data: summarizeResponseData(axiosError.response?.data),
-        message: axiosError.message,
-        code: axiosError.code,
-        timeoutMs: axiosError.config?.timeout,
-        url: axiosError.config?.url,
-      });
-      return;
-    }
-
-    console.error(`Engine ${context.operation} failed`, {
-      path: context.path,
-      userId: context.userId,
+  private logError(operation: string, path: string, userId: string, error: unknown): void {
+    console.error(`Engine ${operation} failed`, {
+      path,
+      userId,
       message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
@@ -455,33 +427,11 @@ export class EngineClient {
 }
 
 function summarizeResponseKeys(data: unknown): string[] {
-  if (!data || typeof data !== 'object') {
-    return [];
-  }
-
+  if (!data || typeof data !== 'object') return [];
   if (Array.isArray(data)) {
     return data.length > 0 && data[0] && typeof data[0] === 'object'
       ? Object.keys(data[0] as Record<string, unknown>)
       : [];
   }
-
   return Object.keys(data as Record<string, unknown>);
-}
-
-function summarizeResponseData(data: unknown): unknown {
-  if (!data || typeof data !== 'object') {
-    return data;
-  }
-
-  if (Array.isArray(data)) {
-    return {
-      type: 'array',
-      length: data.length,
-      firstKeys: data[0] && typeof data[0] === 'object' ? Object.keys(data[0] as Record<string, unknown>) : [],
-    };
-  }
-
-  return {
-    keys: Object.keys(data as Record<string, unknown>),
-  };
 }

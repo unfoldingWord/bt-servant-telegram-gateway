@@ -14,8 +14,8 @@ export interface IncomingMessage {
   file_id: string | null;
   message_age_cutoff: number;
   speaker: string;
-  speaker_language_code?: string;
-  thread_id?: string;
+  speaker_language_code?: string | undefined;
+  thread_id?: string | undefined;
   addressed_to_bot: boolean;
 }
 
@@ -44,7 +44,26 @@ export interface TelegramMessage {
 export interface TelegramMessageEntity {
   offset: number;
   length: number;
-  type: 'mention' | 'bot_command' | 'hashtag' | 'cashtag' | 'url' | 'email' | 'phone_number' | 'bold' | 'italic' | 'underline' | 'strikethrough' | 'spoiler' | 'blockquote' | 'expandable_blockquote' | 'code' | 'pre' | 'text_link' | 'text_mention' | 'custom_emoji';
+  type:
+    | 'mention'
+    | 'bot_command'
+    | 'hashtag'
+    | 'cashtag'
+    | 'url'
+    | 'email'
+    | 'phone_number'
+    | 'bold'
+    | 'italic'
+    | 'underline'
+    | 'strikethrough'
+    | 'spoiler'
+    | 'blockquote'
+    | 'expandable_blockquote'
+    | 'code'
+    | 'pre'
+    | 'text_link'
+    | 'text_mention'
+    | 'custom_emoji';
   user?: TelegramUser;
   url?: string;
   language?: string;
@@ -188,7 +207,9 @@ export function getMessageAge(message: IncomingMessage): number {
 }
 
 function buildSpeakerLabel(user: TelegramUser): string {
-  const parts = [user.first_name, user.last_name].filter((part): part is string => Boolean(part && part.trim()));
+  const parts = [user.first_name, user.last_name].filter((part): part is string =>
+    Boolean(part && part.trim())
+  );
   if (parts.length > 0) {
     return parts.join(' ').trim();
   }

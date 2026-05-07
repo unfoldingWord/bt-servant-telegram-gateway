@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['tests/**/*.test.ts'],
-    exclude: ['netlify/functions/**', 'dist/**', '.netlify/**'],
+    include: ['tests/unit/**/*.test.ts'],
+    exclude: ['dist/**', '.wrangler/**'],
   },
 });

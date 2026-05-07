@@ -1,0 +1,5 @@
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_BOT_USERNAME=your_bot_username
+WEBHOOK_SECRET_TOKEN=your_webhook_secret
+ENGINE_API_KEY=your_engine_api_key
+GATEWAY_PUBLIC_URL=https://your-gateway.workers.dev
