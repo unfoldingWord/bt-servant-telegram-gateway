@@ -10,7 +10,6 @@ export interface MessageHandlerDependencies {
   telegramClient: TelegramClient;
   engineClient: EngineClient;
   engineGateway?: EngineGateway;
-  progressThrottleSeconds?: number;
   fallbackMessage?: string;
 }
 
@@ -131,7 +130,6 @@ export async function handleIncomingMessage(
         threadId: message.thread_id,
         responseLanguageHint: message.speaker_language_code,
       },
-      progressThrottleSeconds: dependencies.progressThrottleSeconds,
     });
 
     console.info('Engine response text', {

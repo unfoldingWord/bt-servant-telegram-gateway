@@ -52,7 +52,6 @@ describe('gateway integration smoke', () => {
         {
           telegramClient,
           engineClient,
-          progressThrottleSeconds: 3,
         }
       );
 

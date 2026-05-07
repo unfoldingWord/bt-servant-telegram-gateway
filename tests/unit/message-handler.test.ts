@@ -41,24 +41,17 @@ describe('handleIncomingMessage', () => {
       {
         telegramClient: telegramClient as never,
         engineClient: engineClient as never,
-        progressThrottleSeconds: 3,
       }
     );
 
     expect(telegramClient.sendChatAction).toHaveBeenCalledWith('2002', 'typing');
-    expect(engineClient.sendTextMessage).toHaveBeenCalledWith(
-      '1001',
-      'hello',
-      {
-        chatType: 'private',
-        chatId: '2002',
-        speaker: 'Alex',
-        threadId: undefined,
-        responseLanguageHint: undefined,
-      },
-      undefined,
-      3
-    );
+    expect(engineClient.sendTextMessage).toHaveBeenCalledWith('1001', 'hello', {
+      chatType: 'private',
+      chatId: '2002',
+      speaker: 'Alex',
+      threadId: undefined,
+      responseLanguageHint: undefined,
+    });
     expect(telegramClient.sendTextMessage).toHaveBeenCalledTimes(3);
     expect(result).toEqual({ handled: true, sentChunks: 3 });
   });

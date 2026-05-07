@@ -51,7 +51,6 @@ app.post('/telegram-webhook', async (c) => {
     const work = handleIncomingMessage(message, {
       telegramClient,
       engineClient,
-      progressThrottleSeconds: parseEnvNumber(env.PROGRESS_THROTTLE_SECONDS, 3),
     }).catch((error) => {
       console.error('Webhook background handler failed', {
         error: error instanceof Error ? error.message : 'Unknown error',

@@ -12,7 +12,7 @@ const describeLive = liveEnabled ? describe : describe.skip;
 
 describeLive('live e2e gateway smoke', () => {
   it('delivers a telegram update through the live gateway', async () => {
-    const response = await fetch(`${GATEWAY_PUBLIC_URL}/api/telegram-webhook`, {
+    const response = await fetch(`${GATEWAY_PUBLIC_URL}/telegram-webhook`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

@@ -27,7 +27,7 @@ describe('EngineClient', () => {
 
     const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
 
-    const result = await client.sendTextMessage('user-1', 'hello', 'https://gateway/progress', 7);
+    const result = await client.sendTextMessage('user-1', 'hello');
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://engine.example.com/api/v1/chat',
@@ -52,19 +52,13 @@ describe('EngineClient', () => {
 
     const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
 
-    await client.sendTextMessage(
-      'user-1',
-      'hello',
-      {
-        chatType: 'group',
-        chatId: 'group-42',
-        speaker: 'Alice',
-        threadId: 'thread-7',
-        responseLanguageHint: 'ru',
-      },
-      'https://gateway/progress',
-      5
-    );
+    await client.sendTextMessage('user-1', 'hello', {
+      chatType: 'group',
+      chatId: 'group-42',
+      speaker: 'Alice',
+      threadId: 'thread-7',
+      responseLanguageHint: 'ru',
+    });
 
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
     expect(body).toMatchObject({

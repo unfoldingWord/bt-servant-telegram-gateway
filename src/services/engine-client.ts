@@ -76,28 +76,9 @@ export class EngineClient {
   async sendTextMessage(
     userId: string,
     message: string,
-    progressCallbackUrl?: string,
-    progressThrottleSeconds?: number
-  ): Promise<ChatResponse>;
-  async sendTextMessage(
-    userId: string,
-    message: string,
-    context: EngineMessageContext,
-    progressCallbackUrl?: string,
-    progressThrottleSeconds?: number
-  ): Promise<ChatResponse>;
-  async sendTextMessage(
-    userId: string,
-    message: string,
-    contextOrCallbackUrl?: string | EngineMessageContext,
-    _callbackUrlOrThrottle?: string | number,
-    _progressThrottleSeconds?: number
+    context: EngineMessageContext = {}
   ): Promise<ChatResponse> {
     const startedAt = Date.now();
-    const context =
-      typeof contextOrCallbackUrl === 'string' || contextOrCallbackUrl === undefined
-        ? {}
-        : contextOrCallbackUrl;
 
     const payload: EngineChatRequest = {
       client_id: 'telegram-gateway',

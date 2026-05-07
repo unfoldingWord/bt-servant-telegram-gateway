@@ -150,6 +150,10 @@ MESSAGE_AGE_CUTOFF_IN_SECONDS # Max message age (default: 3600)
 LOG_LEVEL                 # Logging level (default: INFO)
 ```
 
+## Code Review
+
+Code reviews are handled by **Codex**, initiated by the user. Do not proactively run code reviews. Wait for the user to initiate the Codex review. After Codex review passes clean, the PR can be merged.
+
 ## Deployment
 
 All deployments go through CI/CD (GitHub Actions):
