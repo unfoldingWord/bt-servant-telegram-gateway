@@ -51,6 +51,7 @@ app.post('/telegram-webhook', async (c) => {
     const work = handleIncomingMessage(message, {
       telegramClient,
       engineClient,
+      forwardAllGroupMessages: env.FORWARD_ALL_GROUP_MESSAGES === 'true',
     }).catch((error) => {
       console.error('Webhook background handler failed', {
         error: error instanceof Error ? error.message : 'Unknown error',

@@ -1,6 +1,7 @@
 export interface ChatResponse {
   message: string;
   message_key?: string;
+  voice_audio_url?: string;
   [key: string]: unknown;
 }
 
@@ -24,6 +25,23 @@ export interface EngineChatRequest {
   speaker?: string;
   thread_id?: string;
   response_language_hint?: string;
+  addressed_to_bot?: boolean;
+  org?: string;
+}
+
+export interface EngineAudioRequest {
+  client_id: 'telegram-gateway';
+  user_id: string;
+  message_type: 'audio';
+  audio_base64: string;
+  audio_format: string;
+  message?: string;
+  chat_type?: 'private' | 'group' | 'supergroup';
+  chat_id?: string;
+  speaker?: string;
+  thread_id?: string;
+  response_language_hint?: string;
+  addressed_to_bot?: boolean;
   org?: string;
 }
 
@@ -33,6 +51,7 @@ export interface EngineMessageContext {
   speaker?: string | undefined;
   threadId?: string | undefined;
   responseLanguageHint?: string | undefined;
+  addressedToBot?: boolean | undefined;
 }
 
 interface EngineChatApiResponse {
@@ -78,46 +97,48 @@ export class EngineClient {
     message: string,
     context: EngineMessageContext = {}
   ): Promise<ChatResponse> {
-    const startedAt = Date.now();
-
     const payload: EngineChatRequest = {
       client_id: 'telegram-gateway',
       user_id: userId,
       message_type: 'text',
       message,
-      ...(context.chatType ? { chat_type: context.chatType } : {}),
-      ...(context.chatId ? { chat_id: context.chatId } : {}),
-      ...(context.speaker ? { speaker: context.speaker } : {}),
-      ...(context.threadId ? { thread_id: context.threadId } : {}),
-      ...(context.responseLanguageHint
-        ? { response_language_hint: context.responseLanguageHint }
-        : {}),
-      ...(this.org ? { org: this.org } : {}),
+      ...this.buildContextFields(context),
     };
 
     console.info('Engine sendTextMessage start', {
       userId,
-      chatType: context.chatType ?? 'private',
-      chatId: context.chatId,
-      threadId: context.threadId,
-      speaker: context.speaker,
-      responseLanguageHint: context.responseLanguageHint,
-      org: this.org,
+      ...this.logContext(context),
       messageLength: message.length,
-      timeoutMs: this.timeoutMs,
     });
 
-    const path = '/api/v1/chat';
-    const response = await this.fetchWithRetry(path, 'POST', payload, userId, startedAt);
-    const data = (await response.json()) as EngineChatApiResponse;
+    return this.sendChatRequest(payload, userId);
+  }
 
-    console.info('Engine chat response received', {
+  async sendAudioMessage(
+    userId: string,
+    audioBase64: string,
+    audioFormat: string,
+    captionText?: string,
+    context: EngineMessageContext = {}
+  ): Promise<ChatResponse> {
+    const payload: EngineAudioRequest = {
+      client_id: 'telegram-gateway',
+      user_id: userId,
+      message_type: 'audio',
+      audio_base64: audioBase64,
+      audio_format: audioFormat,
+      ...(captionText ? { message: captionText } : {}),
+      ...this.buildContextFields(context),
+    };
+
+    console.info('Engine sendAudioMessage start', {
       userId,
-      durationMs: Date.now() - startedAt,
-      responseKeys: summarizeResponseKeys(data),
+      ...this.logContext(context),
+      audioFormat,
+      audioBase64Length: audioBase64.length,
     });
 
-    return this.mapChatResponse(data);
+    return this.sendChatRequest(payload, userId);
   }
 
   async getUserPreferences(userId: string): Promise<UserPreferences> {
@@ -242,6 +263,88 @@ export class EngineClient {
     }
   }
 
+  async downloadAudio(url: string): Promise<Uint8Array | null> {
+    const resolvedUrl = this.resolveAudioUrl(url);
+    if (!resolvedUrl) {
+      console.error('Engine downloadAudio rejected: URL does not match engine origin', {
+        url,
+        engineBaseUrl: this.baseUrl,
+      });
+      return null;
+    }
+
+    const startedAt = Date.now();
+    console.info('Engine downloadAudio start', { url: resolvedUrl, timeoutMs: this.timeoutMs });
+    try {
+      const response = await fetch(resolvedUrl, {
+        headers: { Authorization: this.headers['Authorization'] ?? '' },
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      if (!response.ok) {
+        console.error('Engine downloadAudio HTTP error', { url, status: response.status });
+        return null;
+      }
+      const buffer = await response.arrayBuffer();
+      console.info('Engine downloadAudio success', {
+        url,
+        sizeBytes: buffer.byteLength,
+        durationMs: Date.now() - startedAt,
+      });
+      return new Uint8Array(buffer);
+    } catch (error) {
+      console.error('Engine downloadAudio failed', {
+        url,
+        durationMs: Date.now() - startedAt,
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return null;
+    }
+  }
+
+  private async sendChatRequest(
+    payload: EngineChatRequest | EngineAudioRequest,
+    userId: string
+  ): Promise<ChatResponse> {
+    const startedAt = Date.now();
+    const path = '/api/v1/chat';
+    const response = await this.fetchWithRetry(path, 'POST', payload, userId, startedAt);
+    const data = (await response.json()) as EngineChatApiResponse;
+
+    console.info('Engine chat response received', {
+      userId,
+      durationMs: Date.now() - startedAt,
+      responseKeys: summarizeResponseKeys(data),
+    });
+
+    return this.mapChatResponse(data);
+  }
+
+  private buildContextFields(context: EngineMessageContext): Record<string, unknown> {
+    return {
+      ...(context.chatType ? { chat_type: context.chatType } : {}),
+      ...(context.chatId ? { chat_id: context.chatId } : {}),
+      ...(context.speaker ? { speaker: context.speaker } : {}),
+      ...(context.threadId ? { thread_id: context.threadId } : {}),
+      ...(context.responseLanguageHint
+        ? { response_language_hint: context.responseLanguageHint }
+        : {}),
+      ...(context.addressedToBot !== undefined ? { addressed_to_bot: context.addressedToBot } : {}),
+      ...(this.org ? { org: this.org } : {}),
+    };
+  }
+
+  private logContext(context: EngineMessageContext): Record<string, unknown> {
+    return {
+      chatType: context.chatType ?? 'private',
+      chatId: context.chatId,
+      threadId: context.threadId,
+      speaker: context.speaker,
+      responseLanguageHint: context.responseLanguageHint,
+      org: this.org,
+      timeoutMs: this.timeoutMs,
+    };
+  }
+
   private async fetchWithRetry(
     path: string,
     method: string,
@@ -327,6 +430,30 @@ export class EngineClient {
     }
 
     return 1000;
+  }
+
+  /**
+   * Resolve a voice audio URL to an absolute URL rooted at the engine origin.
+   * Accepts relative paths (e.g. "/api/v1/audio/...") or absolute URLs that
+   * match the configured engine baseUrl origin. Returns null if the URL
+   * points to a different host — prevents leaking ENGINE_API_KEY.
+   */
+  private resolveAudioUrl(url: string): string | null {
+    if (url.startsWith('/')) {
+      return `${this.baseUrl}${url}`;
+    }
+
+    try {
+      const parsed = new URL(url);
+      const base = new URL(this.baseUrl);
+      if (parsed.origin === base.origin) {
+        return url;
+      }
+    } catch {
+      // malformed URL
+    }
+
+    return null;
   }
 
   private preferencesPath(userId: string): string {
