@@ -264,10 +264,19 @@ export class EngineClient {
   }
 
   async downloadAudio(url: string): Promise<Uint8Array | null> {
+    const resolvedUrl = this.resolveAudioUrl(url);
+    if (!resolvedUrl) {
+      console.error('Engine downloadAudio rejected: URL does not match engine origin', {
+        url,
+        engineBaseUrl: this.baseUrl,
+      });
+      return null;
+    }
+
     const startedAt = Date.now();
-    console.info('Engine downloadAudio start', { url, timeoutMs: this.timeoutMs });
+    console.info('Engine downloadAudio start', { url: resolvedUrl, timeoutMs: this.timeoutMs });
     try {
-      const response = await fetch(url, {
+      const response = await fetch(resolvedUrl, {
         headers: { Authorization: this.headers['Authorization'] ?? '' },
         signal: AbortSignal.timeout(this.timeoutMs),
       });
@@ -421,6 +430,30 @@ export class EngineClient {
     }
 
     return 1000;
+  }
+
+  /**
+   * Resolve a voice audio URL to an absolute URL rooted at the engine origin.
+   * Accepts relative paths (e.g. "/api/v1/audio/...") or absolute URLs that
+   * match the configured engine baseUrl origin. Returns null if the URL
+   * points to a different host — prevents leaking ENGINE_API_KEY.
+   */
+  private resolveAudioUrl(url: string): string | null {
+    if (url.startsWith('/')) {
+      return `${this.baseUrl}${url}`;
+    }
+
+    try {
+      const parsed = new URL(url);
+      const base = new URL(this.baseUrl);
+      if (parsed.origin === base.origin) {
+        return url;
+      }
+    } catch {
+      // malformed URL
+    }
+
+    return null;
   }
 
   private preferencesPath(userId: string): string {
