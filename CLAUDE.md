@@ -27,12 +27,13 @@ The gateway is intentionally "dumb" - it does NO AI processing itself. This sepa
 
 Telegram Gateway is a Cloudflare Worker that handles Telegram Bot API webhook integration for the BT Servant Worker. It:
 
-- Receives webhook updates from Telegram (text messages in private chats, groups, supergroups, topics)
+- Receives webhook updates from Telegram (text and voice/audio messages in private chats, groups, supergroups, topics)
 - Validates the webhook secret token
-- Forwards messages to the BT Servant Worker API
-- Sends responses back to users via Telegram
+- Forwards messages to the BT Servant Worker API (text as-is, voice/audio as base64-encoded bytes)
+- Sends responses back to users via Telegram (text and/or voice via `sendVoice`)
 - Uses `waitUntil()` pattern to return 200 immediately and process in background
 - Handles `/start`, `/help`, and `/reset` slash commands locally
+- Supports full group conversation awareness via `FORWARD_ALL_GROUP_MESSAGES` flag
 
 **Important**: This gateway has ZERO AI dependency. All AI processing happens in the worker.
 
@@ -46,15 +47,16 @@ src/
 ├── core/
 │   └── models.ts         # Telegram types, update parsing, message validation
 ├── services/
-│   ├── engine-client.ts  # HTTP client for worker API (with 429 retry)
+│   ├── engine-client.ts  # HTTP client for worker API (text + audio, with 429 retry)
 │   ├── engine-adapter.ts # Thin facade over engine-client
-│   ├── message-handler.ts # Message processing orchestration
+│   ├── message-handler.ts # Message processing orchestration (text + voice dispatch)
+│   ├── encoding.ts       # Base64 encoding for Cloudflare Workers
 │   ├── chunking.ts       # Message splitting for Telegram limits
 │   ├── telegram-format.ts # Markdown -> Telegram HTML conversion
 │   ├── engine-response-format.ts # Response normalization
 │   └── progress-message.ts # Progress callback parsing
 └── telegram/
-    └── client.ts         # Telegram API wrapper (fetch-based)
+    └── client.ts         # Telegram API wrapper (fetch-based, text + voice + file download)
 ```
 
 **Dependency Rules (ESLint enforced):**
@@ -147,6 +149,7 @@ ENGINE_TIMEOUT_MS         # Engine request timeout (default: 45000)
 TELEGRAM_TIMEOUT_MS       # Telegram API timeout (default: 15000)
 PROGRESS_THROTTLE_SECONDS # Progress callback throttle (default: 3)
 MESSAGE_AGE_CUTOFF_IN_SECONDS # Max message age (default: 3600)
+FORWARD_ALL_GROUP_MESSAGES # Forward all group messages to worker (default: false)
 LOG_LEVEL                 # Logging level (default: INFO)
 ```
 
@@ -168,8 +171,10 @@ All deployments go through CI/CD (GitHub Actions):
 - `src/index.ts` - Hono app with all routes
 - `src/config/types.ts` - Env interface
 - `src/core/models.ts` - Telegram update parsing, bot addressing logic, message validation
-- `src/telegram/client.ts` - Telegram API wrapper (fetch-based, no axios)
-- `src/services/engine-client.ts` - Engine API client (with 429 retry)
-- `src/services/message-handler.ts` - Message processing orchestration
+- `src/telegram/client.ts` - Telegram API wrapper (text, voice, file download)
+- `src/services/engine-client.ts` - Engine API client (text + audio, with 429 retry)
+- `src/services/engine-adapter.ts` - Thin facade over engine-client
+- `src/services/message-handler.ts` - Message processing orchestration (text + voice dispatch)
+- `src/services/encoding.ts` - Base64 encoding utility (CF Workers compatible)
 - `src/services/chunking.ts` - Message chunking for Telegram's 4000 char limit
 - `wrangler.toml` - Cloudflare Workers configuration

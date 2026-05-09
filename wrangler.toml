@@ -11,6 +11,7 @@ head_sampling_rate = 1
 
 [vars]
 ENVIRONMENT = "production"
+FORWARD_ALL_GROUP_MESSAGES = "false"
 ENGINE_BASE_URL = "https://api.btservant.ai"
 ENGINE_ORG = "unfoldingWord"
 ENGINE_TIMEOUT_MS = "45000"
@@ -31,6 +32,7 @@ name = "bt-servant-telegram-gateway-staging"
 
 [env.staging.vars]
 ENVIRONMENT = "staging"
+FORWARD_ALL_GROUP_MESSAGES = "true"
 ENGINE_BASE_URL = "https://api.btservant.ai"
 ENGINE_ORG = "unfoldingWord"
 ENGINE_TIMEOUT_MS = "45000"

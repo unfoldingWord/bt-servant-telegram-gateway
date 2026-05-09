@@ -1,5 +1,7 @@
 export enum MessageType {
   TEXT = 'text',
+  VOICE = 'voice',
+  AUDIO = 'audio',
   UNKNOWN = 'unknown',
 }
 
@@ -12,6 +14,8 @@ export interface IncomingMessage {
   timestamp: number;
   text: string;
   file_id: string | null;
+  duration?: number | undefined;
+  mime_type?: string | undefined;
   message_age_cutoff: number;
   speaker: string;
   speaker_language_code?: string | undefined;
@@ -123,8 +127,34 @@ export interface TelegramDocument {
 }
 
 type TelegramMessageContent =
-  | { messageType: MessageType.TEXT; text: string; fileId: null }
-  | { messageType: MessageType.UNKNOWN; text: string; fileId: null };
+  | {
+      messageType: MessageType.TEXT;
+      text: string;
+      fileId: null;
+      duration?: undefined;
+      mimeType?: undefined;
+    }
+  | {
+      messageType: MessageType.VOICE;
+      text: string;
+      fileId: string;
+      duration: number;
+      mimeType: string;
+    }
+  | {
+      messageType: MessageType.AUDIO;
+      text: string;
+      fileId: string;
+      duration: number;
+      mimeType: string;
+    }
+  | {
+      messageType: MessageType.UNKNOWN;
+      text: string;
+      fileId: null;
+      duration?: undefined;
+      mimeType?: undefined;
+    };
 
 /**
  * Parse a Telegram Update object into an IncomingMessage.
@@ -163,6 +193,22 @@ export function parseTelegramUpdate(
       text: message.text,
       fileId: null,
     };
+  } else if (message.voice) {
+    content = {
+      messageType: MessageType.VOICE,
+      text: message.caption ?? '',
+      fileId: message.voice.file_id,
+      duration: message.voice.duration,
+      mimeType: message.voice.mime_type ?? 'audio/ogg',
+    };
+  } else if (message.audio) {
+    content = {
+      messageType: MessageType.AUDIO,
+      text: message.caption ?? '',
+      fileId: message.audio.file_id,
+      duration: message.audio.duration,
+      mimeType: message.audio.mime_type ?? 'audio/mpeg',
+    };
   }
 
   return {
@@ -174,6 +220,8 @@ export function parseTelegramUpdate(
     timestamp,
     text: content.text,
     file_id: content.fileId,
+    duration: content.duration,
+    mime_type: content.mimeType,
     message_age_cutoff: messageAgeCutoff,
     speaker,
     speaker_language_code: from.language_code,
@@ -186,7 +234,11 @@ export function parseTelegramUpdate(
  * Check if message type is supported for processing.
  */
 export function isSupportedMessageType(messageType: MessageType): boolean {
-  return messageType === MessageType.TEXT;
+  return (
+    messageType === MessageType.TEXT ||
+    messageType === MessageType.VOICE ||
+    messageType === MessageType.AUDIO
+  );
 }
 
 /**
@@ -222,15 +274,15 @@ function buildSpeakerLabel(user: TelegramUser): string {
 }
 
 function isAddressedToBot(message: TelegramMessage, botUsername?: string): boolean {
+  if (message.chat.type === 'private') {
+    return true;
+  }
+
   const text = message.text ?? message.caption ?? '';
   const normalizedText = text.trim();
 
   if (!normalizedText) {
     return false;
-  }
-
-  if (message.chat.type === 'private') {
-    return true;
   }
 
   if (normalizedText.startsWith('/')) {

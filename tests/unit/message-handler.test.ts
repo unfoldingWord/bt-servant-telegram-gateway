@@ -51,6 +51,7 @@ describe('handleIncomingMessage', () => {
       speaker: 'Alex',
       threadId: undefined,
       responseLanguageHint: undefined,
+      addressedToBot: true,
     });
     expect(telegramClient.sendTextMessage).toHaveBeenCalledTimes(3);
     expect(result).toEqual({ handled: true, sentChunks: 3 });

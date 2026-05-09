@@ -204,7 +204,7 @@ describe('core models', () => {
     expect(parseTelegramUpdate(update, 3600)).toBeNull();
   });
 
-  it('marks non-text updates as unsupported through UNKNOWN type', () => {
+  it('parses voice messages with file_id, duration, and mime_type', () => {
     const update = {
       update_id: 1,
       message: {
@@ -232,16 +232,19 @@ describe('core models', () => {
       chat_id: '2002',
       chat_type: 'private',
       message_id: '42',
-      message_type: MessageType.UNKNOWN,
+      message_type: MessageType.VOICE,
       timestamp: 1_700_000_000,
       text: '',
-      file_id: null,
+      file_id: 'voice-file',
+      duration: 12,
+      mime_type: 'audio/ogg',
       message_age_cutoff: 3600,
       speaker: 'Alex',
       speaker_language_code: undefined,
       thread_id: undefined,
-      addressed_to_bot: false,
+      addressed_to_bot: true,
     });
+    expect(isSupportedMessageType(MessageType.VOICE)).toBe(true);
     expect(isSupportedMessageType(MessageType.UNKNOWN)).toBe(false);
   });
 

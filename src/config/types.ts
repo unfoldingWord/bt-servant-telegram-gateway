@@ -16,6 +16,7 @@ export interface Env {
   GATEWAY_PUBLIC_URL?: string;
 
   // Variables (from wrangler.toml [vars])
+  FORWARD_ALL_GROUP_MESSAGES?: string;
   ENVIRONMENT?: string;
   ENGINE_BASE_URL: string;
   ENGINE_ORG?: string;

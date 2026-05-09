@@ -1,9 +1,15 @@
-import { isMessageTooOld, isSupportedMessageType, type IncomingMessage } from '../core/models.js';
-import { EngineClient } from './engine-client.js';
+import {
+  MessageType,
+  isMessageTooOld,
+  isSupportedMessageType,
+  type IncomingMessage,
+} from '../core/models.js';
+import { type ChatResponse, EngineClient } from './engine-client.js';
 import { EngineGateway } from './engine-adapter.js';
 import { formatEngineResponse } from './engine-response-format.js';
 import { chunkMessage } from './chunking.js';
 import { formatTelegramHtml } from './telegram-format.js';
+import { uint8ArrayToBase64 } from './encoding.js';
 import { TelegramClient } from '../telegram/client.js';
 
 export interface MessageHandlerDependencies {
@@ -11,6 +17,7 @@ export interface MessageHandlerDependencies {
   engineClient: EngineClient;
   engineGateway?: EngineGateway;
   fallbackMessage?: string;
+  forwardAllGroupMessages?: boolean;
 }
 
 export interface MessageHandlerResult {
@@ -51,15 +58,23 @@ export async function handleIncomingMessage(
   }
 
   if (isGroupChat(message.chat_type) && !message.addressed_to_bot) {
-    console.info('Ignoring group message without direct bot address', {
+    if (!dependencies.forwardAllGroupMessages) {
+      console.info('Ignoring group message without direct bot address', {
+        userId: message.user_id,
+        chatId: message.chat_id,
+        chatType: message.chat_type,
+        speaker: message.speaker,
+        threadId: message.thread_id,
+        text: previewText(message.text),
+      });
+      return { handled: false, reason: 'unsupported_message' };
+    }
+    console.info('Forwarding non-addressed group message', {
       userId: message.user_id,
       chatId: message.chat_id,
       chatType: message.chat_type,
       speaker: message.speaker,
-      threadId: message.thread_id,
-      text: previewText(message.text),
     });
-    return { handled: false, reason: 'unsupported_message' };
   }
 
   if (isResetCommand(message.text)) {
@@ -117,70 +132,209 @@ export async function handleIncomingMessage(
     return { handled: true, sentChunks: 1 };
   }
 
+  const isVoice =
+    message.message_type === MessageType.VOICE || message.message_type === MessageType.AUDIO;
+
+  if (isVoice) {
+    return handleVoiceMessage(message, engineGateway, telegramClient, fallbackMessage);
+  }
+
+  return handleTextEngineRequest(message, engineGateway, telegramClient, fallbackMessage);
+}
+
+function buildEngineContext(message: IncomingMessage) {
+  return {
+    chatType: normalizeChatType(message.chat_type),
+    chatId: message.chat_id,
+    speaker: message.speaker,
+    threadId: message.thread_id,
+    responseLanguageHint: message.speaker_language_code,
+    addressedToBot: message.addressed_to_bot,
+  };
+}
+
+async function handleTextEngineRequest(
+  message: IncomingMessage,
+  engineGateway: EngineGateway,
+  telegramClient: TelegramClient,
+  fallbackMessage: string
+): Promise<MessageHandlerResult> {
   void sendTypingIndicator(telegramClient, message.chat_id, message.thread_id);
 
   try {
     const response = await engineGateway.requestFinalReply({
       userId: message.user_id,
       message: message.text,
-      context: {
-        chatType: normalizeChatType(message.chat_type),
-        chatId: message.chat_id,
-        speaker: message.speaker,
-        threadId: message.thread_id,
-        responseLanguageHint: message.speaker_language_code,
-      },
+      context: buildEngineContext(message),
     });
 
-    console.info('Engine response text', {
-      userId: message.user_id,
-      chatId: message.chat_id,
-      text: previewText(response.message),
-    });
-
-    const formattedResponse = formatEngineResponse(response.message);
-    const chunks = chunkMessage(formattedResponse);
-    let sentChunks = 0;
-
-    for (const chunk of chunks) {
-      const renderedChunk = formatTelegramHtml(chunk);
-      console.info('Sending telegram chunk', {
-        userId: message.user_id,
-        chatId: message.chat_id,
-        text: previewText(chunk),
-        html: previewText(renderedChunk),
-      });
-
-      const ok = await sendTextMessage(
-        telegramClient,
-        message.chat_id,
-        renderedChunk,
-        message.thread_id,
-        'HTML'
-      );
-      if (ok) {
-        sentChunks += 1;
-      }
-    }
-
-    console.info('Message handled', {
-      userId: message.user_id,
-      chatId: message.chat_id,
-      sentChunks,
-    });
-
-    return { handled: true, sentChunks };
+    return sendEngineResponse(response, message, telegramClient, engineGateway);
   } catch (error) {
-    console.error('Message handler failed', {
+    console.error('Text message handler failed', {
       userId: message.user_id,
       chatId: message.chat_id,
       messageId: message.message_id,
       error: error instanceof Error ? error.message : 'Unknown error',
     });
-
     await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
     return { handled: false, reason: 'engine_error' };
   }
+}
+
+async function handleVoiceMessage(
+  message: IncomingMessage,
+  engineGateway: EngineGateway,
+  telegramClient: TelegramClient,
+  fallbackMessage: string
+): Promise<MessageHandlerResult> {
+  void sendChatAction(telegramClient, message.chat_id, 'upload_voice', message.thread_id);
+
+  try {
+    if (!message.file_id) {
+      console.error('Voice message missing file_id', { messageId: message.message_id });
+      await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
+      return { handled: false, reason: 'engine_error' };
+    }
+
+    const audioBytes = await downloadVoiceFile(telegramClient, message.file_id);
+    if (!audioBytes) {
+      await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
+      return { handled: false, reason: 'engine_error' };
+    }
+
+    const audioBase64 = uint8ArrayToBase64(audioBytes);
+    const audioFormat = message.mime_type ?? 'audio/ogg';
+
+    const response = await engineGateway.requestAudioReply({
+      userId: message.user_id,
+      audioBase64,
+      audioFormat,
+      captionText: message.text || undefined,
+      context: buildEngineContext(message),
+    });
+
+    return sendEngineResponse(response, message, telegramClient, engineGateway);
+  } catch (error) {
+    console.error('Voice message handler failed', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+      messageId: message.message_id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
+    return { handled: false, reason: 'engine_error' };
+  }
+}
+
+async function downloadVoiceFile(
+  telegramClient: TelegramClient,
+  fileId: string
+): Promise<Uint8Array | null> {
+  const file = await telegramClient.getFile(fileId);
+  if (!file?.file_path) {
+    console.error('Failed to get file path for voice message', { fileId });
+    return null;
+  }
+  return telegramClient.downloadFile(file.file_path);
+}
+
+async function sendEngineResponse(
+  response: ChatResponse,
+  message: IncomingMessage,
+  telegramClient: TelegramClient,
+  engineGateway: EngineGateway
+): Promise<MessageHandlerResult> {
+  const hasText = response.message.trim().length > 0;
+  const hasVoice = !!response.voice_audio_url;
+
+  console.info('Engine response received', {
+    userId: message.user_id,
+    chatId: message.chat_id,
+    hasText,
+    hasVoice,
+    text: previewText(response.message),
+  });
+
+  if (!hasText && !hasVoice) {
+    console.info('Engine returned empty response, sending nothing', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+    });
+    return { handled: true, sentChunks: 0 };
+  }
+
+  let sentChunks = 0;
+
+  if (hasText) {
+    sentChunks = await sendTextChunks(response.message, message, telegramClient);
+  }
+
+  if (hasVoice) {
+    await sendVoiceResponse(response.voice_audio_url!, message, telegramClient, engineGateway);
+  }
+
+  console.info('Message handled', {
+    userId: message.user_id,
+    chatId: message.chat_id,
+    sentChunks,
+    voiceSent: hasVoice,
+  });
+
+  return { handled: true, sentChunks };
+}
+
+async function sendTextChunks(
+  text: string,
+  message: IncomingMessage,
+  telegramClient: TelegramClient
+): Promise<number> {
+  const formattedResponse = formatEngineResponse(text);
+  const chunks = chunkMessage(formattedResponse);
+  let sentChunks = 0;
+
+  for (const chunk of chunks) {
+    const renderedChunk = formatTelegramHtml(chunk);
+    const ok = await sendTextMessage(
+      telegramClient,
+      message.chat_id,
+      renderedChunk,
+      message.thread_id,
+      'HTML'
+    );
+    if (ok) sentChunks += 1;
+  }
+
+  return sentChunks;
+}
+
+async function sendVoiceResponse(
+  voiceAudioUrl: string,
+  message: IncomingMessage,
+  telegramClient: TelegramClient,
+  engineGateway: EngineGateway
+): Promise<void> {
+  void sendChatAction(telegramClient, message.chat_id, 'upload_voice', message.thread_id);
+
+  const audioData = await engineGateway.downloadVoiceAudio(voiceAudioUrl);
+  if (!audioData) {
+    console.error('Failed to download voice audio from engine', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+      voiceAudioUrl,
+    });
+    return;
+  }
+
+  const sent = await telegramClient.sendVoice(message.chat_id, audioData, {
+    messageThreadId: message.thread_id,
+  });
+
+  console.info('Voice message sent', {
+    userId: message.user_id,
+    chatId: message.chat_id,
+    sent,
+    sizeBytes: audioData.length,
+  });
 }
 
 function previewText(text: string, maxLength = 240): string {
