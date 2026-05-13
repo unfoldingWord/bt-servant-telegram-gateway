@@ -4,7 +4,12 @@ import {
   isSupportedMessageType,
   type IncomingMessage,
 } from '../core/models.js';
-import { type ChatResponse, EngineClient } from './engine-client.js';
+import {
+  type ChatResponse,
+  EngineClient,
+  type ModeScope,
+  type ModeSummary,
+} from './engine-client.js';
 import { EngineGateway } from './engine-adapter.js';
 import { formatEngineResponse } from './engine-response-format.js';
 import { chunkMessage } from './chunking.js';
@@ -22,7 +27,7 @@ export interface MessageHandlerDependencies {
 
 export interface MessageHandlerResult {
   handled: boolean;
-  reason?: 'unsupported_message' | 'too_old' | 'engine_error' | 'reset';
+  reason?: 'unsupported_message' | 'too_old' | 'engine_error' | 'reset' | 'mode';
   sentChunks?: number;
 }
 
@@ -115,6 +120,10 @@ export async function handleIncomingMessage(
       );
       return { handled: false, reason: 'engine_error' };
     }
+  }
+
+  if (isModeCommand(message.text)) {
+    return handleModeCommand(message, engineGateway, telegramClient);
   }
 
   if (isStartCommand(message.text)) {
@@ -372,6 +381,180 @@ function isHelpCommand(text: string): boolean {
   return /^\/help(?:@\w+)?(?:\s|$)/iu.test(text.trim());
 }
 
+const MODE_COMMAND_REGEX = /^\/mode(?:@\w+)?(?:\s+(\S+))?\s*$/iu;
+
+function isModeCommand(text: string): boolean {
+  return MODE_COMMAND_REGEX.test(text.trim());
+}
+
+function parseModeArgument(text: string): string | undefined {
+  const match = text.trim().match(MODE_COMMAND_REGEX);
+  return match?.[1];
+}
+
+function modeScopeFor(message: IncomingMessage): ModeScope {
+  if (isGroupChat(message.chat_type)) {
+    return { kind: 'group', chatId: message.chat_id };
+  }
+  return { kind: 'user', userId: message.user_id };
+}
+
+function formatModeList(modes: ModeSummary[]): string {
+  if (modes.length === 0) {
+    return 'No modes are currently published for this organization.';
+  }
+
+  const lines = modes.map((mode) => {
+    const label = mode.label && mode.label.trim() ? mode.label.trim() : mode.name;
+    return label === mode.name ? `- ${mode.name}` : `- ${mode.name} — ${label}`;
+  });
+
+  return [
+    'Available modes:',
+    ...lines,
+    '',
+    'Use /mode <name> to switch, or /mode default to clear.',
+  ].join('\n');
+}
+
+async function handleModeCommand(
+  message: IncomingMessage,
+  engineGateway: EngineGateway,
+  telegramClient: TelegramClient
+): Promise<MessageHandlerResult> {
+  const argument = parseModeArgument(message.text);
+  const scope = modeScopeFor(message);
+
+  if (argument === undefined) {
+    return handleModeList(message, engineGateway, telegramClient);
+  }
+
+  if (argument.toLowerCase() === 'default') {
+    return handleModeClear(message, engineGateway, telegramClient, scope);
+  }
+
+  return handleModeSet(message, engineGateway, telegramClient, scope, argument);
+}
+
+async function handleModeList(
+  message: IncomingMessage,
+  engineGateway: EngineGateway,
+  telegramClient: TelegramClient
+): Promise<MessageHandlerResult> {
+  try {
+    const modes = await engineGateway.listModes();
+    const published = modes.filter((mode) => mode.published === true);
+    await sendTextMessage(
+      telegramClient,
+      message.chat_id,
+      formatModeList(published),
+      message.thread_id
+    );
+    return { handled: true, reason: 'mode', sentChunks: 1 };
+  } catch (error) {
+    console.error('Mode list failed', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    await sendTextMessage(
+      telegramClient,
+      message.chat_id,
+      'Sorry, I could not load the available modes.',
+      message.thread_id
+    );
+    return { handled: false, reason: 'engine_error' };
+  }
+}
+
+async function handleModeClear(
+  message: IncomingMessage,
+  engineGateway: EngineGateway,
+  telegramClient: TelegramClient,
+  scope: ModeScope
+): Promise<MessageHandlerResult> {
+  try {
+    await engineGateway.clearMode(scope);
+    console.info('Mode cleared', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+      scope: scope.kind,
+    });
+    await sendTextMessage(telegramClient, message.chat_id, 'Mode cleared.', message.thread_id);
+    return { handled: true, reason: 'mode', sentChunks: 1 };
+  } catch (error) {
+    console.error('Mode clear failed', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    await sendTextMessage(
+      telegramClient,
+      message.chat_id,
+      'Sorry, I could not clear the mode.',
+      message.thread_id
+    );
+    return { handled: false, reason: 'engine_error' };
+  }
+}
+
+function formatUnknownModeMessage(requestedName: string, published: ModeSummary[]): string {
+  const available =
+    published.length > 0 ? published.map((mode) => mode.name).join(', ') : '(no published modes)';
+  return `Unknown mode '${requestedName}'. Available modes: ${available}.`;
+}
+
+async function handleModeSet(
+  message: IncomingMessage,
+  engineGateway: EngineGateway,
+  telegramClient: TelegramClient,
+  scope: ModeScope,
+  requestedName: string
+): Promise<MessageHandlerResult> {
+  try {
+    const published = (await engineGateway.listModes()).filter((mode) => mode.published === true);
+    const match = published.find((mode) => mode.name === requestedName);
+
+    if (!match) {
+      await sendTextMessage(
+        telegramClient,
+        message.chat_id,
+        formatUnknownModeMessage(requestedName, published),
+        message.thread_id
+      );
+      return { handled: true, reason: 'mode', sentChunks: 1 };
+    }
+
+    await engineGateway.setMode(scope, match.name);
+    console.info('Mode set', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+      scope: scope.kind,
+      mode: match.name,
+    });
+    await sendTextMessage(
+      telegramClient,
+      message.chat_id,
+      `Mode set to ${match.name}.`,
+      message.thread_id
+    );
+    return { handled: true, reason: 'mode', sentChunks: 1 };
+  } catch (error) {
+    console.error('Mode set failed', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    await sendTextMessage(
+      telegramClient,
+      message.chat_id,
+      'Sorry, I could not update the mode.',
+      message.thread_id
+    );
+    return { handled: false, reason: 'engine_error' };
+  }
+}
+
 function buildStartMessage(message: IncomingMessage): string {
   const intro = 'Welcome! I can help with Bible translation and study.';
 
@@ -389,6 +572,7 @@ function buildHelpMessage(): string {
     '- Help with translation questions',
     '- Continue the current conversation',
     '- Reset the current conversation with /reset',
+    '- Switch modes with /mode <name> (or /mode to list, /mode default to clear)',
   ].join('\n');
 }
 
