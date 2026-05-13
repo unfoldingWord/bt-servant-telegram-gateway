@@ -3,11 +3,26 @@ import type { Env } from './config/types.js';
 import { parseEnvNumber } from './config/types.js';
 import { parseTelegramUpdate } from './core/models.js';
 import { handleIncomingMessage } from './services/message-handler.js';
-import { parseProgressMessage } from './services/progress-message.js';
+import { parseCallbackPayload } from './services/callback-payload.js';
+import { CompletedKeysMap } from './services/dedup.js';
+import {
+  dispatchEngineResponse,
+  sendTextMessage as sendTelegramTextMessage,
+} from './services/response-dispatch.js';
+import { EngineGateway } from './services/engine-adapter.js';
 import { TelegramClient } from './telegram/client.js';
 import { EngineClient } from './services/engine-client.js';
 
 const app = new Hono<{ Bindings: Env }>();
+
+const completedKeys = new CompletedKeysMap({ ttlMs: 3_600_000, sweepIntervalMs: 60_000 });
+
+const DEFAULT_FALLBACK_MESSAGE = 'Sorry, something went wrong. Please try again.';
+
+function buildProgressCallbackUrl(publicUrl: string | undefined): string | undefined {
+  if (!publicUrl) return undefined;
+  return `${publicUrl.replace(/\/$/u, '')}/progress-callback`;
+}
 
 app.get('/', (c) => {
   return c.json({ service: 'bt-servant-telegram-gateway', status: 'running' });
@@ -48,21 +63,16 @@ app.post('/telegram-webhook', async (c) => {
       parseEnvNumber(env.ENGINE_TIMEOUT_MS, 45000)
     );
 
-    const work = handleIncomingMessage(message, {
+    await handleIncomingMessage(message, {
       telegramClient,
       engineClient,
       forwardAllGroupMessages: env.FORWARD_ALL_GROUP_MESSAGES === 'true',
+      progressCallbackUrl: buildProgressCallbackUrl(env.GATEWAY_PUBLIC_URL),
     }).catch((error) => {
-      console.error('Webhook background handler failed', {
+      console.error('Webhook handler failed', {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     });
-
-    if (c.executionCtx?.waitUntil) {
-      c.executionCtx.waitUntil(work);
-    } else {
-      await work;
-    }
 
     return c.json({ ok: true });
   } catch (error) {
@@ -81,28 +91,107 @@ app.post('/progress-callback', async (c) => {
     return c.text('Unauthorized', 401);
   }
 
+  let body: unknown;
   try {
-    const body = await c.req.json();
-    const payload = parseProgressMessage(body);
-    if (!payload) {
-      return c.text('Bad Request', 400);
-    }
+    body = await c.req.json();
+  } catch {
+    return c.text('Bad Request', 400);
+  }
 
-    const telegramClient = new TelegramClient(
-      env.TELEGRAM_BOT_TOKEN,
-      parseEnvNumber(env.TELEGRAM_TIMEOUT_MS, 15000)
-    );
-    const sent = await telegramClient.sendTextMessage(payload.chat_id, payload.text);
-    if (!sent) {
-      return c.text('Failed to deliver progress update', 502);
-    }
-
-    return c.json({ ok: true, message_key: payload.message_key });
-  } catch (error) {
-    console.error('Progress callback failed', {
-      error: error instanceof Error ? error.message : 'Unknown error',
+  const payload = parseCallbackPayload(body);
+  if (!payload) {
+    console.error('Progress callback rejected: unrecognized payload', {
+      bodyKeys:
+        body && typeof body === 'object' ? Object.keys(body as Record<string, unknown>) : null,
     });
     return c.text('Bad Request', 400);
+  }
+
+  console.info('Progress callback received', {
+    type: payload.type,
+    userId: payload.user_id,
+    messageKey: payload.message_key,
+    ...('chat_id' in payload ? { chatId: payload.chat_id } : {}),
+    ...('thread_id' in payload ? { threadId: payload.thread_id } : {}),
+  });
+
+  const telegramClient = new TelegramClient(
+    env.TELEGRAM_BOT_TOKEN,
+    parseEnvNumber(env.TELEGRAM_TIMEOUT_MS, 15000)
+  );
+
+  if (payload.type === 'status') {
+    return c.json({ ok: true, message_key: payload.message_key });
+  }
+
+  if (payload.type === 'error') {
+    const chatId = payload.chat_id;
+    if (!chatId) {
+      console.error('Progress callback error event missing chat_id', {
+        messageKey: payload.message_key,
+        userId: payload.user_id,
+      });
+      return c.json({ ok: true, message_key: payload.message_key });
+    }
+    console.error('Engine reported error', {
+      messageKey: payload.message_key,
+      userId: payload.user_id,
+      error: payload.error,
+    });
+    await sendTelegramTextMessage(
+      telegramClient,
+      chatId,
+      DEFAULT_FALLBACK_MESSAGE,
+      payload.thread_id
+    );
+    return c.json({ ok: true, message_key: payload.message_key });
+  }
+
+  // complete
+  if (!completedKeys.remember(payload.message_key)) {
+    console.info('Duplicate complete callback ignored', {
+      messageKey: payload.message_key,
+      userId: payload.user_id,
+    });
+    return c.json({ ok: true, message_key: payload.message_key, duplicate: true });
+  }
+
+  const chatId = payload.chat_id;
+  if (!chatId) {
+    console.error('Progress callback complete event missing chat_id', {
+      messageKey: payload.message_key,
+      userId: payload.user_id,
+    });
+    return c.text('Bad Request', 400);
+  }
+
+  const engineClient = new EngineClient(
+    env.ENGINE_BASE_URL,
+    env.ENGINE_API_KEY,
+    env.ENGINE_ORG,
+    parseEnvNumber(env.ENGINE_TIMEOUT_MS, 45000)
+  );
+  const engineGateway = new EngineGateway(engineClient);
+
+  try {
+    await dispatchEngineResponse({
+      chatId,
+      threadId: payload.thread_id,
+      text: payload.text,
+      voiceAudioUrl: payload.voice_audio_url,
+      attachments: payload.attachments,
+      telegramClient,
+      engineGateway,
+      logContext: { userId: payload.user_id, messageKey: payload.message_key },
+    });
+    return c.json({ ok: true, message_key: payload.message_key });
+  } catch (error) {
+    console.error('Progress callback dispatch failed', {
+      messageKey: payload.message_key,
+      userId: payload.user_id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return c.text('Failed to deliver response', 502);
   }
 });
 
