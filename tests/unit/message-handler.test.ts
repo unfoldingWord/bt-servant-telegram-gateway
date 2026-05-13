@@ -443,4 +443,271 @@ describe('handleIncomingMessage', () => {
     expect(engineClient.updateUserPreferences).not.toHaveBeenCalled();
     expect(result).toEqual({ handled: true, sentChunks: 1 });
   });
+
+  it('lists available published modes when /mode has no argument', async () => {
+    const telegramClient = {
+      sendChatAction: vi.fn(),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn(),
+      listModes: vi
+        .fn()
+        .mockResolvedValue([
+          { name: 'spoken-mode', label: 'Spoken Servant', published: true },
+          { name: 'translation-coach', published: true },
+          { name: 'draft-mode', published: false },
+          { name: 'no-flag-mode' },
+        ]),
+      setMode: vi.fn(),
+      clearMode: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: '/mode',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(engineClient.listModes).toHaveBeenCalledTimes(1);
+    expect(engineClient.setMode).not.toHaveBeenCalled();
+    const [, body] = telegramClient.sendTextMessage.mock.calls[0] ?? [];
+    expect(body).toContain('Available modes:');
+    expect(body).toContain('- spoken-mode — Spoken Servant');
+    expect(body).toContain('- translation-coach');
+    expect(body).not.toContain('draft-mode');
+    expect(body).not.toContain('no-flag-mode');
+    expect(result).toEqual({ handled: true, reason: 'mode', sentChunks: 1 });
+  });
+
+  it('sets the mode on the user scope in private chats', async () => {
+    const telegramClient = {
+      sendChatAction: vi.fn(),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn(),
+      listModes: vi.fn().mockResolvedValue([{ name: 'spoken-mode', published: true }]),
+      setMode: vi.fn().mockResolvedValue(undefined),
+      clearMode: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: '/mode spoken-mode',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(engineClient.setMode).toHaveBeenCalledWith(
+      { kind: 'user', userId: '1001' },
+      'spoken-mode'
+    );
+    expect(telegramClient.sendTextMessage).toHaveBeenCalledWith('2002', 'Mode set to spoken-mode.');
+    expect(result).toEqual({ handled: true, reason: 'mode', sentChunks: 1 });
+  });
+
+  it('sets the mode on the group scope in group chats and tolerates @botname', async () => {
+    const telegramClient = {
+      sendChatAction: vi.fn(),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn(),
+      listModes: vi.fn().mockResolvedValue([{ name: 'spoken-mode', published: true }]),
+      setMode: vi.fn().mockResolvedValue(undefined),
+      clearMode: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '-5286198901',
+        chat_type: 'supergroup',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: '/mode@bt_servant_qa_bot spoken-mode',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(engineClient.setMode).toHaveBeenCalledWith(
+      { kind: 'group', chatId: '-5286198901' },
+      'spoken-mode'
+    );
+    expect(result).toEqual({ handled: true, reason: 'mode', sentChunks: 1 });
+  });
+
+  it('rejects an unknown mode without writing to the engine', async () => {
+    const telegramClient = {
+      sendChatAction: vi.fn(),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn(),
+      listModes: vi.fn().mockResolvedValue([
+        { name: 'spoken-mode', published: true },
+        { name: 'translation-coach', published: true },
+      ]),
+      setMode: vi.fn(),
+      clearMode: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: '/mode bogus',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(engineClient.setMode).not.toHaveBeenCalled();
+    const [, body] = telegramClient.sendTextMessage.mock.calls[0] ?? [];
+    expect(body).toContain("Unknown mode 'bogus'");
+    expect(body).toContain('spoken-mode');
+    expect(body).toContain('translation-coach');
+    expect(result).toEqual({ handled: true, reason: 'mode', sentChunks: 1 });
+  });
+
+  it('clears the mode on /mode default', async () => {
+    const telegramClient = {
+      sendChatAction: vi.fn(),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn(),
+      listModes: vi.fn(),
+      setMode: vi.fn(),
+      clearMode: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: '/mode default',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(engineClient.clearMode).toHaveBeenCalledWith({ kind: 'user', userId: '1001' });
+    expect(engineClient.listModes).not.toHaveBeenCalled();
+    expect(telegramClient.sendTextMessage).toHaveBeenCalledWith('2002', 'Mode cleared.');
+    expect(result).toEqual({ handled: true, reason: 'mode', sentChunks: 1 });
+  });
+
+  it('falls back gracefully when the engine errors during /mode set', async () => {
+    const telegramClient = {
+      sendChatAction: vi.fn(),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn(),
+      listModes: vi.fn().mockRejectedValue(new Error('Engine API error: 500')),
+      setMode: vi.fn(),
+      clearMode: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: '/mode spoken-mode',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(telegramClient.sendTextMessage).toHaveBeenCalledWith(
+      '2002',
+      'Sorry, I could not update the mode.'
+    );
+    expect(result).toEqual({ handled: false, reason: 'engine_error' });
+  });
 });

@@ -15,6 +15,15 @@ export interface ResetConversationOptions {
   threadId?: string | undefined;
 }
 
+export interface ModeSummary {
+  name: string;
+  label?: string;
+  description?: string;
+  published?: boolean;
+}
+
+export type ModeScope = { kind: 'user'; userId: string } | { kind: 'group'; chatId: string };
+
 export interface EngineChatRequest {
   client_id: 'telegram-gateway';
   user_id: string;
@@ -263,6 +272,98 @@ export class EngineClient {
     }
   }
 
+  async listModes(): Promise<ModeSummary[]> {
+    const path = this.modesPath();
+    const startedAt = Date.now();
+    console.info('Engine listModes start', { path, org: this.org, timeoutMs: this.timeoutMs });
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'GET',
+        headers: this.headers,
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Engine API error: ${response.status}`);
+      }
+
+      const data = (await response.json()) as { modes?: ModeSummary[] };
+      const modes = Array.isArray(data.modes) ? data.modes : [];
+      console.info('Engine listModes success', {
+        path,
+        durationMs: Date.now() - startedAt,
+        modeCount: modes.length,
+      });
+      return modes;
+    } catch (error) {
+      this.logError('listModes', path, '-', error);
+      throw error;
+    }
+  }
+
+  async setMode(scope: ModeScope, name: string): Promise<void> {
+    const path = this.modePath(scope);
+    const identifier = scope.kind === 'user' ? scope.userId : scope.chatId;
+    const startedAt = Date.now();
+    console.info('Engine setMode start', {
+      path,
+      org: this.org,
+      scope: scope.kind,
+      timeoutMs: this.timeoutMs,
+    });
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'PUT',
+        headers: this.headers,
+        body: JSON.stringify({ mode: name }),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Engine API error: ${response.status}`);
+      }
+
+      console.info('Engine setMode success', {
+        path,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      this.logError('setMode', path, identifier, error);
+      throw error;
+    }
+  }
+
+  async clearMode(scope: ModeScope): Promise<void> {
+    const path = this.modePath(scope);
+    const identifier = scope.kind === 'user' ? scope.userId : scope.chatId;
+    const startedAt = Date.now();
+    console.info('Engine clearMode start', {
+      path,
+      org: this.org,
+      scope: scope.kind,
+      timeoutMs: this.timeoutMs,
+    });
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'DELETE',
+        headers: this.headers,
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Engine API error: ${response.status}`);
+      }
+
+      console.info('Engine clearMode success', {
+        path,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      this.logError('clearMode', path, identifier, error);
+      throw error;
+    }
+  }
+
   async downloadAudio(url: string): Promise<Uint8Array | null> {
     const resolvedUrl = this.resolveAudioUrl(url);
     if (!resolvedUrl) {
@@ -459,6 +560,19 @@ export class EngineClient {
   private preferencesPath(userId: string): string {
     const org = encodeURIComponent(this.org ?? 'DEFAULT_ORG');
     return `/api/v1/orgs/${org}/users/${encodeURIComponent(userId)}/preferences`;
+  }
+
+  private modesPath(): string {
+    const org = encodeURIComponent(this.org ?? 'DEFAULT_ORG');
+    return `/api/v1/admin/orgs/${org}/modes`;
+  }
+
+  private modePath(scope: ModeScope): string {
+    const org = encodeURIComponent(this.org ?? 'DEFAULT_ORG');
+    if (scope.kind === 'user') {
+      return `/api/v1/admin/orgs/${org}/users/${encodeURIComponent(scope.userId)}/mode`;
+    }
+    return `/api/v1/admin/orgs/${org}/groups/${encodeURIComponent(scope.chatId)}/mode`;
   }
 
   private resetPath(userId: string, options: ResetConversationOptions): string {

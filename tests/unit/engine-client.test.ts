@@ -170,4 +170,109 @@ describe('EngineClient', () => {
       expect.objectContaining({ method: 'DELETE' })
     );
   });
+
+  it('lists modes from the admin endpoint', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        org: 'org-1',
+        modes: [
+          { name: 'spoken-mode', published: true },
+          { name: 'draft', published: false },
+        ],
+      })
+    );
+
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
+
+    const modes = await client.listModes();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://engine.example.com/api/v1/admin/orgs/org-1/modes',
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(modes).toEqual([
+      { name: 'spoken-mode', published: true },
+      { name: 'draft', published: false },
+    ]);
+  });
+
+  it('returns an empty array when listModes response has no modes field', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ org: 'org-1' }));
+
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
+
+    await expect(client.listModes()).resolves.toEqual([]);
+  });
+
+  it('throws on listModes HTTP error', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: 'nope' }, 500));
+
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
+
+    await expect(client.listModes()).rejects.toThrow('Engine API error: 500');
+  });
+
+  it('sets a user-scoped mode via PUT', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ mode: 'spoken-mode' }));
+
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
+
+    await client.setMode({ kind: 'user', userId: 'user-1' }, 'spoken-mode');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://engine.example.com/api/v1/admin/orgs/org-1/users/user-1/mode',
+      expect.objectContaining({ method: 'PUT' })
+    );
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body).toEqual({ mode: 'spoken-mode' });
+  });
+
+  it('sets a group-scoped mode via PUT', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ mode: 'spoken-mode' }));
+
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
+
+    await client.setMode({ kind: 'group', chatId: '-100123' }, 'spoken-mode');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://engine.example.com/api/v1/admin/orgs/org-1/groups/-100123/mode',
+      expect.objectContaining({ method: 'PUT' })
+    );
+  });
+
+  it('clears a user-scoped mode via DELETE', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ mode: null }));
+
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
+
+    await client.clearMode({ kind: 'user', userId: 'user-1' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://engine.example.com/api/v1/admin/orgs/org-1/users/user-1/mode',
+      expect.objectContaining({ method: 'DELETE' })
+    );
+  });
+
+  it('clears a group-scoped mode via DELETE', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ mode: null }));
+
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
+
+    await client.clearMode({ kind: 'group', chatId: '-100123' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://engine.example.com/api/v1/admin/orgs/org-1/groups/-100123/mode',
+      expect.objectContaining({ method: 'DELETE' })
+    );
+  });
+
+  it('throws when setMode HTTP fails', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: 'bad' }, 400));
+
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
+
+    await expect(client.setMode({ kind: 'user', userId: 'user-1' }, 'foo')).rejects.toThrow(
+      'Engine API error: 400'
+    );
+  });
 });

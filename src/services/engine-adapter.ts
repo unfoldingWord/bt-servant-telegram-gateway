@@ -1,4 +1,10 @@
-import { EngineClient, type EngineMessageContext, type ChatResponse } from './engine-client.js';
+import {
+  EngineClient,
+  type EngineMessageContext,
+  type ChatResponse,
+  type ModeScope,
+  type ModeSummary,
+} from './engine-client.js';
 
 export interface FinalReplyRequest {
   userId: string;
@@ -46,5 +52,17 @@ export class EngineGateway {
       chatId,
       threadId,
     });
+  }
+
+  async listModes(): Promise<ModeSummary[]> {
+    return this.client.listModes();
+  }
+
+  async setMode(scope: ModeScope, name: string): Promise<void> {
+    await this.client.setMode(scope, name);
+  }
+
+  async clearMode(scope: ModeScope): Promise<void> {
+    await this.client.clearMode(scope);
   }
 }

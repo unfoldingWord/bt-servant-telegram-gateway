@@ -95,6 +95,38 @@ If `WEBHOOK_SECRET_TOKEN` is not used, omit the `secret_token` field.
 
 To enable group mentions, set `TELEGRAM_BOT_USERNAME` via `wrangler secret put` to the bot username without the leading `@`.
 
+## Slash commands
+
+The gateway handles these slash commands locally (no LLM round-trip):
+
+| Command         | Behavior                                                                       |
+| --------------- | ------------------------------------------------------------------------------ |
+| `/start`        | Sends a short welcome message.                                                 |
+| `/help`         | Lists what the bot can do.                                                     |
+| `/reset`        | Clears the current conversation history (per chat).                            |
+| `/mode <name>`  | Switches the active mode for this chat. Pre-validated against published modes. |
+| `/mode`         | Lists available (published) modes.                                             |
+| `/mode default` | Clears the persisted mode for this chat.                                       |
+
+All commands accept the `@botname` suffix used in group chats (e.g. `/mode@bt_servant_qa_bot spoken-mode`).
+
+Register the command list with Telegram once after deploy so they autocomplete in clients:
+
+```bash
+curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "commands": [
+      {"command": "start", "description": "Welcome message"},
+      {"command": "help", "description": "List capabilities"},
+      {"command": "reset", "description": "Reset the current conversation"},
+      {"command": "mode", "description": "Switch modes (no arg lists; default clears)"}
+    ]
+  }'
+```
+
+Re-run this curl whenever the command list changes.
+
 ## Deployment
 
 All deployments go through GitHub Actions CI/CD:
