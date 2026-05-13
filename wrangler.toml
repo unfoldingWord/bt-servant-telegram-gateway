@@ -33,7 +33,7 @@ name = "bt-servant-telegram-gateway-staging"
 [env.staging.vars]
 ENVIRONMENT = "staging"
 FORWARD_ALL_GROUP_MESSAGES = "true"
-ENGINE_BASE_URL = "https://api.btservant.ai"
+ENGINE_BASE_URL = "https://staging-api.btservant.ai"
 ENGINE_ORG = "unfoldingWord"
 ENGINE_TIMEOUT_MS = "45000"
 TELEGRAM_TIMEOUT_MS = "15000"
