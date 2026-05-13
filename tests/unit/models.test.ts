@@ -294,6 +294,50 @@ describe('core models', () => {
     expect(result?.addressed_to_bot).toBe(true);
   });
 
+  it('does not treat captionless voice replies to a different bot as addressed', () => {
+    const update = {
+      update_id: 9,
+      message: {
+        message_id: 204,
+        from: {
+          id: 1005,
+          is_bot: false,
+          first_name: 'Ian',
+        },
+        chat: {
+          id: -5121603836,
+          type: 'supergroup' as const,
+          title: 'Study Group',
+        },
+        date: 1_700_000_800,
+        voice: {
+          file_id: 'voice-other-bot',
+          file_unique_id: 'voice-other-bot-unique',
+          duration: 7,
+        },
+        reply_to_message: {
+          message_id: 197,
+          from: {
+            id: 8888,
+            is_bot: true,
+            first_name: 'Other Bot',
+            username: 'some_other_bot',
+          },
+          chat: {
+            id: -5121603836,
+            type: 'supergroup' as const,
+            title: 'Study Group',
+          },
+          date: 1_700_000_780,
+          text: 'unrelated',
+        },
+      },
+    };
+
+    const result = parseTelegramUpdate(update, 3600, 'bt24_test_bot');
+    expect(result?.addressed_to_bot).toBe(false);
+  });
+
   it('keeps captionless voice replies to a non-bot user as un-addressed', () => {
     const update = {
       update_id: 6,

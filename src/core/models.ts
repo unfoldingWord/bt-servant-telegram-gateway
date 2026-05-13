@@ -338,13 +338,22 @@ function isReplyToBot(message: TelegramMessage, botUsername?: string): boolean {
   }
 
   const repliedFrom = repliedMessage.from;
-  if (repliedFrom?.is_bot) {
+  if (!repliedFrom?.is_bot) {
+    return false;
+  }
+
+  const normalizedBotUsername = botUsername?.replace(/^@/u, '').trim().toLowerCase();
+  if (!normalizedBotUsername) {
+    // No bot username configured — fall back to legacy lenient behavior:
+    // any bot reply counts as addressed. Matches prior semantics for installs
+    // that haven't set TELEGRAM_BOT_USERNAME.
     return true;
   }
 
-  const repliedUsername = repliedFrom?.username?.trim().toLowerCase();
-  const normalizedBotUsername = botUsername?.replace(/^@/u, '').trim().toLowerCase();
-  if (!repliedUsername || !normalizedBotUsername) {
+  const repliedUsername = repliedFrom.username?.trim().toLowerCase();
+  if (!repliedUsername) {
+    // Replied to a bot with no username on the reply target — can't
+    // disambiguate from another bot; treat as not addressed.
     return false;
   }
 
