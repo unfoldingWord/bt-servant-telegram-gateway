@@ -148,7 +148,7 @@ app.post('/progress-callback', async (c) => {
   }
 
   // complete
-  if (!completedKeys.remember(payload.message_key)) {
+  if (completedKeys.isCompleted(payload.message_key)) {
     console.info('Duplicate complete callback ignored', {
       messageKey: payload.message_key,
       userId: payload.user_id,
@@ -173,8 +173,14 @@ app.post('/progress-callback', async (c) => {
   );
   const engineGateway = new EngineGateway(engineClient);
 
+  const expectedText = typeof payload.text === 'string' && payload.text.trim().length > 0;
+  const expectedVoice = !!payload.voice_audio_url;
+  const expectedAttachments = Array.isArray(payload.attachments) ? payload.attachments.length : 0;
+  const expectedSomething = expectedText || expectedVoice || expectedAttachments > 0;
+
+  let dispatch;
   try {
-    await dispatchEngineResponse({
+    dispatch = await dispatchEngineResponse({
       chatId,
       threadId: payload.thread_id,
       text: payload.text,
@@ -184,7 +190,6 @@ app.post('/progress-callback', async (c) => {
       engineGateway,
       logContext: { userId: payload.user_id, messageKey: payload.message_key },
     });
-    return c.json({ ok: true, message_key: payload.message_key });
   } catch (error) {
     console.error('Progress callback dispatch failed', {
       messageKey: payload.message_key,
@@ -193,6 +198,24 @@ app.post('/progress-callback', async (c) => {
     });
     return c.text('Failed to deliver response', 502);
   }
+
+  const deliveredAnything =
+    dispatch.sentChunks > 0 || dispatch.voiceSent || dispatch.attachmentsSent > 0;
+
+  if (expectedSomething && !deliveredAnything) {
+    console.error('Progress callback delivered no messages despite non-empty payload', {
+      messageKey: payload.message_key,
+      userId: payload.user_id,
+      expectedText,
+      expectedVoice,
+      expectedAttachments,
+      dispatch,
+    });
+    return c.text('Failed to deliver response', 502);
+  }
+
+  completedKeys.markCompleted(payload.message_key);
+  return c.json({ ok: true, message_key: payload.message_key });
 });
 
 export default app;

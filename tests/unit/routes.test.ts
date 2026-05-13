@@ -227,6 +227,97 @@ describe('Hono routes', () => {
     expect(data2.duplicate).toBe(true);
   });
 
+  it('POST /progress-callback returns 502 and retains retry eligibility when dispatch throws', async () => {
+    dispatchEngineResponse.mockRejectedValueOnce(new Error('telegram down')).mockResolvedValueOnce({
+      sentChunks: 1,
+      voiceSent: false,
+      attachmentsSent: 0,
+      empty: false,
+    });
+
+    const app = await importApp();
+    const env = makeEnv();
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-engine-token': 'test-engine-key',
+    };
+    const body = JSON.stringify({
+      type: 'complete',
+      user_id: '1001',
+      message_key: 'telegram:retry',
+      chat_id: '2002',
+      text: 'final response',
+    });
+
+    const res1 = await app.request('/progress-callback', { method: 'POST', headers, body }, env);
+    expect(res1.status).toBe(502);
+
+    const res2 = await app.request('/progress-callback', { method: 'POST', headers, body }, env);
+    expect(res2.status).toBe(200);
+    expect(dispatchEngineResponse).toHaveBeenCalledTimes(2);
+    const data2 = (await res2.json()) as Record<string, unknown>;
+    expect(data2.duplicate).toBeUndefined();
+  });
+
+  it('POST /progress-callback returns 502 when dispatch reports nothing delivered though something was expected', async () => {
+    dispatchEngineResponse.mockResolvedValue({
+      sentChunks: 0,
+      voiceSent: false,
+      attachmentsSent: 0,
+      empty: false,
+    });
+
+    const app = await importApp();
+    const res = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body: JSON.stringify({
+          type: 'complete',
+          user_id: '1001',
+          message_key: 'telegram:silent-fail',
+          chat_id: '2002',
+          text: 'final response',
+        }),
+      },
+      makeEnv()
+    );
+    expect(res.status).toBe(502);
+  });
+
+  it('POST /progress-callback succeeds on an empty engine payload without marking failure', async () => {
+    dispatchEngineResponse.mockResolvedValue({
+      sentChunks: 0,
+      voiceSent: false,
+      attachmentsSent: 0,
+      empty: true,
+    });
+
+    const app = await importApp();
+    const res = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body: JSON.stringify({
+          type: 'complete',
+          user_id: '1001',
+          message_key: 'telegram:empty',
+          chat_id: '2002',
+        }),
+      },
+      makeEnv()
+    );
+    expect(res.status).toBe(200);
+  });
+
   it('POST /progress-callback delivers fallback text on error events', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true })));
 

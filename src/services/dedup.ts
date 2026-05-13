@@ -19,21 +19,24 @@ export class CompletedKeysMap {
   }
 
   /**
-   * Register a key as completed. Returns true if this is the first time the
-   * key is seen within the TTL window; false if it has already been recorded.
-   * Callers should only proceed with side-effects on `true`.
+   * Read-only check: is this key currently marked as completed within the TTL?
+   * Triggers a sweep but does not register the key.
    */
-  remember(key: string): boolean {
+  isCompleted(key: string): boolean {
     const now = this.now();
     this.maybeSweep(now);
-
     const existing = this.entries.get(key);
-    if (existing !== undefined && existing > now) {
-      return false;
-    }
+    return existing !== undefined && existing > now;
+  }
 
+  /**
+   * Mark a key as completed. Idempotent — calling on an already-marked key
+   * just refreshes the expiry.
+   */
+  markCompleted(key: string): void {
+    const now = this.now();
+    this.maybeSweep(now);
     this.entries.set(key, now + this.ttlMs);
-    return true;
   }
 
   size(): number {
