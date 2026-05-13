@@ -1,7 +1,16 @@
+export interface ChatAttachment {
+  type: 'audio';
+  url: string;
+  mime_type: string;
+  r2_key?: string;
+  duration_ms?: number | null;
+}
+
 export interface ChatResponse {
   message: string;
   message_key?: string;
   voice_audio_url?: string;
+  attachments?: ChatAttachment[];
   [key: string]: unknown;
 }
 

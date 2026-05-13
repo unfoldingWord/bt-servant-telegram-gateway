@@ -5,6 +5,7 @@ import {
   type IncomingMessage,
 } from '../core/models.js';
 import {
+  type ChatAttachment,
   type ChatResponse,
   EngineClient,
   type ModeScope,
@@ -255,16 +256,19 @@ async function sendEngineResponse(
 ): Promise<MessageHandlerResult> {
   const hasText = response.message.trim().length > 0;
   const hasVoice = !!response.voice_audio_url;
+  const attachments = Array.isArray(response.attachments) ? response.attachments : [];
+  const hasAttachments = attachments.length > 0;
 
   console.info('Engine response received', {
     userId: message.user_id,
     chatId: message.chat_id,
     hasText,
     hasVoice,
+    attachmentCount: attachments.length,
     text: previewText(response.message),
   });
 
-  if (!hasText && !hasVoice) {
+  if (!hasText && !hasVoice && !hasAttachments) {
     console.info('Engine returned empty response, sending nothing', {
       userId: message.user_id,
       chatId: message.chat_id,
@@ -273,7 +277,6 @@ async function sendEngineResponse(
   }
 
   let sentChunks = 0;
-
   if (hasText) {
     sentChunks = await sendTextChunks(response.message, message, telegramClient);
   }
@@ -282,14 +285,71 @@ async function sendEngineResponse(
     await sendVoiceResponse(response.voice_audio_url!, message, telegramClient, engineGateway);
   }
 
+  let attachmentsSent = 0;
+  for (let i = 0; i < attachments.length; i++) {
+    const sent = await sendAudioAttachment(
+      attachments[i]!,
+      i,
+      message,
+      telegramClient,
+      engineGateway
+    );
+    if (sent) attachmentsSent += 1;
+  }
+
   console.info('Message handled', {
     userId: message.user_id,
     chatId: message.chat_id,
     sentChunks,
     voiceSent: hasVoice,
+    attachmentsSent,
   });
 
   return { handled: true, sentChunks };
+}
+
+async function sendAudioAttachment(
+  attachment: ChatAttachment,
+  index: number,
+  message: IncomingMessage,
+  telegramClient: TelegramClient,
+  engineGateway: EngineGateway
+): Promise<boolean> {
+  if (attachment.type !== 'audio') {
+    console.info('Skipping non-audio attachment', { index, type: attachment.type });
+    return false;
+  }
+  if (attachment.mime_type !== 'audio/ogg') {
+    console.warn('Audio attachment mime_type is not audio/ogg; attempting sendVoice anyway', {
+      index,
+      mimeType: attachment.mime_type,
+      url: attachment.url,
+    });
+  }
+
+  void sendChatAction(telegramClient, message.chat_id, 'upload_voice', message.thread_id);
+
+  const audioData = await engineGateway.downloadVoiceAudio(attachment.url);
+  if (!audioData) {
+    console.error('Attachment fetch failed', {
+      index,
+      url: attachment.url,
+      mimeType: attachment.mime_type,
+    });
+    return false;
+  }
+
+  const sent = await telegramClient.sendVoice(message.chat_id, audioData, {
+    messageThreadId: message.thread_id,
+  });
+  console.info('Audio attachment sent', {
+    index,
+    url: attachment.url,
+    mimeType: attachment.mime_type,
+    sent,
+    sizeBytes: audioData.length,
+  });
+  return sent;
 }
 
 async function sendTextChunks(
