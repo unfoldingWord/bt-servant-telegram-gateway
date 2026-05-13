@@ -211,6 +211,19 @@ export function parseTelegramUpdate(
     };
   }
 
+  console.info('Parsed Telegram update', {
+    updateId: update.update_id,
+    messageId: message_id,
+    chatType: chat_type,
+    messageType: content.messageType,
+    hasReply: Boolean(message.reply_to_message),
+    replyToFromUsername: message.reply_to_message?.from?.username,
+    replyToIsBot: message.reply_to_message?.from?.is_bot ?? false,
+    hasCaption: Boolean(message.caption),
+    entityCount: message.entities?.length ?? 0,
+    addressedToBot,
+  });
+
   return {
     user_id,
     chat_id,
@@ -281,16 +294,19 @@ function isAddressedToBot(message: TelegramMessage, botUsername?: string): boole
   const text = message.text ?? message.caption ?? '';
   const normalizedText = text.trim();
 
-  if (!normalizedText) {
-    return false;
+  // Reply-to-bot is a structural property of the update; it doesn't require
+  // text content, so check it before the empty-text short-circuit. Otherwise
+  // captionless voice replies to the bot are misclassified as ambient.
+  if (isReplyToBot(message, botUsername)) {
+    return true;
   }
 
   if (normalizedText.startsWith('/')) {
     return true;
   }
 
-  if (isReplyToBot(message, botUsername)) {
-    return true;
+  if (!normalizedText) {
+    return false;
   }
 
   if (!botUsername) {
@@ -322,13 +338,22 @@ function isReplyToBot(message: TelegramMessage, botUsername?: string): boolean {
   }
 
   const repliedFrom = repliedMessage.from;
-  if (repliedFrom?.is_bot) {
+  if (!repliedFrom?.is_bot) {
+    return false;
+  }
+
+  const normalizedBotUsername = botUsername?.replace(/^@/u, '').trim().toLowerCase();
+  if (!normalizedBotUsername) {
+    // No bot username configured — fall back to legacy lenient behavior:
+    // any bot reply counts as addressed. Matches prior semantics for installs
+    // that haven't set TELEGRAM_BOT_USERNAME.
     return true;
   }
 
-  const repliedUsername = repliedFrom?.username?.trim().toLowerCase();
-  const normalizedBotUsername = botUsername?.replace(/^@/u, '').trim().toLowerCase();
-  if (!repliedUsername || !normalizedBotUsername) {
+  const repliedUsername = repliedFrom.username?.trim().toLowerCase();
+  if (!repliedUsername) {
+    // Replied to a bot with no username on the reply target — can't
+    // disambiguate from another bot; treat as not addressed.
     return false;
   }
 
