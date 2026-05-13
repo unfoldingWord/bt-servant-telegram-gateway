@@ -211,6 +211,19 @@ export function parseTelegramUpdate(
     };
   }
 
+  console.info('Parsed Telegram update', {
+    updateId: update.update_id,
+    messageId: message_id,
+    chatType: chat_type,
+    messageType: content.messageType,
+    hasReply: Boolean(message.reply_to_message),
+    replyToFromUsername: message.reply_to_message?.from?.username,
+    replyToIsBot: message.reply_to_message?.from?.is_bot ?? false,
+    hasCaption: Boolean(message.caption),
+    entityCount: message.entities?.length ?? 0,
+    addressedToBot,
+  });
+
   return {
     user_id,
     chat_id,
@@ -281,16 +294,19 @@ function isAddressedToBot(message: TelegramMessage, botUsername?: string): boole
   const text = message.text ?? message.caption ?? '';
   const normalizedText = text.trim();
 
-  if (!normalizedText) {
-    return false;
+  // Reply-to-bot is a structural property of the update; it doesn't require
+  // text content, so check it before the empty-text short-circuit. Otherwise
+  // captionless voice replies to the bot are misclassified as ambient.
+  if (isReplyToBot(message, botUsername)) {
+    return true;
   }
 
   if (normalizedText.startsWith('/')) {
     return true;
   }
 
-  if (isReplyToBot(message, botUsername)) {
-    return true;
+  if (!normalizedText) {
+    return false;
   }
 
   if (!botUsername) {

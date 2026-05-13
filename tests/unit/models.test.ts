@@ -248,6 +248,153 @@ describe('core models', () => {
     expect(isSupportedMessageType(MessageType.UNKNOWN)).toBe(false);
   });
 
+  it('detects captionless voice replies to the bot as addressed', () => {
+    const update = {
+      update_id: 5,
+      message: {
+        message_id: 200,
+        from: {
+          id: 1005,
+          is_bot: false,
+          first_name: 'Ian',
+        },
+        chat: {
+          id: -5121603836,
+          type: 'supergroup' as const,
+          title: 'Study Group',
+        },
+        date: 1_700_000_400,
+        voice: {
+          file_id: 'voice-reply',
+          file_unique_id: 'voice-reply-unique',
+          duration: 8,
+        },
+        reply_to_message: {
+          message_id: 199,
+          from: {
+            id: 9999,
+            is_bot: true,
+            first_name: 'BT Servant',
+            username: 'bt24_test_bot',
+          },
+          chat: {
+            id: -5121603836,
+            type: 'supergroup' as const,
+            title: 'Study Group',
+          },
+          date: 1_700_000_300,
+          text: 'How can I help?',
+        },
+      },
+    };
+
+    const result = parseTelegramUpdate(update, 3600, 'bt24_test_bot');
+    expect(result?.message_type).toBe(MessageType.VOICE);
+    expect(result?.text).toBe('');
+    expect(result?.addressed_to_bot).toBe(true);
+  });
+
+  it('keeps captionless voice replies to a non-bot user as un-addressed', () => {
+    const update = {
+      update_id: 6,
+      message: {
+        message_id: 201,
+        from: {
+          id: 1005,
+          is_bot: false,
+          first_name: 'Ian',
+        },
+        chat: {
+          id: -5121603836,
+          type: 'supergroup' as const,
+          title: 'Study Group',
+        },
+        date: 1_700_000_500,
+        voice: {
+          file_id: 'voice-reply-2',
+          file_unique_id: 'voice-reply-unique-2',
+          duration: 5,
+        },
+        reply_to_message: {
+          message_id: 198,
+          from: {
+            id: 1006,
+            is_bot: false,
+            first_name: 'Kristina',
+            username: 'kristina',
+          },
+          chat: {
+            id: -5121603836,
+            type: 'supergroup' as const,
+            title: 'Study Group',
+          },
+          date: 1_700_000_250,
+          text: 'hey',
+        },
+      },
+    };
+
+    const result = parseTelegramUpdate(update, 3600, 'bt24_test_bot');
+    expect(result?.addressed_to_bot).toBe(false);
+  });
+
+  it('keeps captionless voice with no reply context as un-addressed in groups', () => {
+    const update = {
+      update_id: 7,
+      message: {
+        message_id: 202,
+        from: {
+          id: 1005,
+          is_bot: false,
+          first_name: 'Ian',
+        },
+        chat: {
+          id: -5121603836,
+          type: 'supergroup' as const,
+          title: 'Study Group',
+        },
+        date: 1_700_000_600,
+        voice: {
+          file_id: 'voice-ambient',
+          file_unique_id: 'voice-ambient-unique',
+          duration: 5,
+        },
+      },
+    };
+
+    const result = parseTelegramUpdate(update, 3600, 'bt24_test_bot');
+    expect(result?.addressed_to_bot).toBe(false);
+  });
+
+  it('detects voice messages addressed via @<bot> caption (regression guard)', () => {
+    const update = {
+      update_id: 8,
+      message: {
+        message_id: 203,
+        from: {
+          id: 1005,
+          is_bot: false,
+          first_name: 'Ian',
+        },
+        chat: {
+          id: -5121603836,
+          type: 'supergroup' as const,
+          title: 'Study Group',
+        },
+        date: 1_700_000_700,
+        voice: {
+          file_id: 'voice-caption',
+          file_unique_id: 'voice-caption-unique',
+          duration: 6,
+        },
+        caption: '@bt24_test_bot here is a story',
+      },
+    };
+
+    const result = parseTelegramUpdate(update, 3600, 'bt24_test_bot');
+    expect(result?.addressed_to_bot).toBe(true);
+  });
+
   it('detects old messages and computes message age', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2024-01-01T00:10:00Z'));
