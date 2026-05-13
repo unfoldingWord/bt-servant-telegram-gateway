@@ -173,11 +173,6 @@ app.post('/progress-callback', async (c) => {
   );
   const engineGateway = new EngineGateway(engineClient);
 
-  const expectedText = typeof payload.text === 'string' && payload.text.trim().length > 0;
-  const expectedVoice = !!payload.voice_audio_url;
-  const expectedAttachments = Array.isArray(payload.attachments) ? payload.attachments.length : 0;
-  const expectedSomething = expectedText || expectedVoice || expectedAttachments > 0;
-
   let dispatch;
   try {
     dispatch = await dispatchEngineResponse({
@@ -199,16 +194,15 @@ app.post('/progress-callback', async (c) => {
     return c.text('Failed to deliver response', 502);
   }
 
-  const deliveredAnything =
-    dispatch.sentChunks > 0 || dispatch.voiceSent || dispatch.attachmentsSent > 0;
+  const fullyDelivered =
+    dispatch.sentChunks === dispatch.expectedChunks &&
+    dispatch.voiceSent === dispatch.voiceExpected &&
+    dispatch.attachmentsSent === dispatch.attachmentsExpected;
 
-  if (expectedSomething && !deliveredAnything) {
-    console.error('Progress callback delivered no messages despite non-empty payload', {
+  if (!fullyDelivered) {
+    console.error('Progress callback delivery incomplete', {
       messageKey: payload.message_key,
       userId: payload.user_id,
-      expectedText,
-      expectedVoice,
-      expectedAttachments,
       dispatch,
     });
     return c.text('Failed to deliver response', 502);

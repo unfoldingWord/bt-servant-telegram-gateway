@@ -17,8 +17,11 @@ export interface DispatchInput {
 }
 
 export interface DispatchResult {
+  expectedChunks: number;
   sentChunks: number;
+  voiceExpected: boolean;
   voiceSent: boolean;
+  attachmentsExpected: number;
   attachmentsSent: number;
   empty: boolean;
 }
@@ -44,12 +47,23 @@ export async function dispatchEngineResponse(input: DispatchInput): Promise<Disp
 
   if (!hasText && !hasVoice && !hasAttachments) {
     console.info('Engine response is empty, sending nothing', { ...logContext, chatId });
-    return { sentChunks: 0, voiceSent: false, attachmentsSent: 0, empty: true };
+    return {
+      expectedChunks: 0,
+      sentChunks: 0,
+      voiceExpected: false,
+      voiceSent: false,
+      attachmentsExpected: 0,
+      attachmentsSent: 0,
+      empty: true,
+    };
   }
 
+  let expectedChunks = 0;
   let sentChunks = 0;
   if (hasText) {
-    sentChunks = await sendTextChunks(input.text!, chatId, threadId, telegramClient);
+    const result = await sendTextChunks(input.text!, chatId, threadId, telegramClient);
+    expectedChunks = result.expected;
+    sentChunks = result.sent;
   }
 
   let voiceSent = false;
@@ -80,12 +94,23 @@ export async function dispatchEngineResponse(input: DispatchInput): Promise<Disp
   console.info('Engine response dispatched', {
     ...logContext,
     chatId,
+    expectedChunks,
     sentChunks,
+    voiceExpected: hasVoice,
     voiceSent,
+    attachmentsExpected: attachments.length,
     attachmentsSent,
   });
 
-  return { sentChunks, voiceSent, attachmentsSent, empty: false };
+  return {
+    expectedChunks,
+    sentChunks,
+    voiceExpected: hasVoice,
+    voiceSent,
+    attachmentsExpected: attachments.length,
+    attachmentsSent,
+    empty: false,
+  };
 }
 
 async function sendTextChunks(
@@ -93,7 +118,7 @@ async function sendTextChunks(
   chatId: string,
   threadId: string | undefined,
   telegramClient: TelegramClient
-): Promise<number> {
+): Promise<{ expected: number; sent: number }> {
   const formatted = formatEngineResponse(text);
   const chunks = chunkMessage(formatted);
   let sent = 0;
@@ -102,7 +127,7 @@ async function sendTextChunks(
     const ok = await sendTextMessage(telegramClient, chatId, rendered, threadId, 'HTML');
     if (ok) sent += 1;
   }
-  return sent;
+  return { expected: chunks.length, sent };
 }
 
 async function sendVoiceResponse(

@@ -160,8 +160,11 @@ describe('Hono routes', () => {
 
   it('POST /progress-callback dispatches complete events', async () => {
     dispatchEngineResponse.mockResolvedValue({
+      expectedChunks: 1,
       sentChunks: 1,
+      voiceExpected: false,
       voiceSent: false,
+      attachmentsExpected: 0,
       attachmentsSent: 0,
       empty: false,
     });
@@ -196,8 +199,11 @@ describe('Hono routes', () => {
 
   it('POST /progress-callback dedupes a duplicate complete with the same message_key', async () => {
     dispatchEngineResponse.mockResolvedValue({
+      expectedChunks: 1,
       sentChunks: 1,
+      voiceExpected: false,
       voiceSent: false,
+      attachmentsExpected: 0,
       attachmentsSent: 0,
       empty: false,
     });
@@ -229,8 +235,11 @@ describe('Hono routes', () => {
 
   it('POST /progress-callback returns 502 and retains retry eligibility when dispatch throws', async () => {
     dispatchEngineResponse.mockRejectedValueOnce(new Error('telegram down')).mockResolvedValueOnce({
+      expectedChunks: 1,
       sentChunks: 1,
+      voiceExpected: false,
       voiceSent: false,
+      attachmentsExpected: 0,
       attachmentsSent: 0,
       empty: false,
     });
@@ -261,8 +270,11 @@ describe('Hono routes', () => {
 
   it('POST /progress-callback returns 502 when dispatch reports nothing delivered though something was expected', async () => {
     dispatchEngineResponse.mockResolvedValue({
+      expectedChunks: 1,
       sentChunks: 0,
+      voiceExpected: false,
       voiceSent: false,
+      attachmentsExpected: 0,
       attachmentsSent: 0,
       empty: false,
     });
@@ -289,10 +301,83 @@ describe('Hono routes', () => {
     expect(res.status).toBe(502);
   });
 
+  it('POST /progress-callback returns 502 on partial text delivery (some chunks dropped)', async () => {
+    dispatchEngineResponse.mockResolvedValue({
+      expectedChunks: 5,
+      sentChunks: 3,
+      voiceExpected: false,
+      voiceSent: false,
+      attachmentsExpected: 0,
+      attachmentsSent: 0,
+      empty: false,
+    });
+
+    const app = await importApp();
+    const res = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body: JSON.stringify({
+          type: 'complete',
+          user_id: '1001',
+          message_key: 'telegram:partial-text',
+          chat_id: '2002',
+          text: 'a very long message split into chunks',
+        }),
+      },
+      makeEnv()
+    );
+    expect(res.status).toBe(502);
+  });
+
+  it('POST /progress-callback returns 502 on partial attachment delivery', async () => {
+    dispatchEngineResponse.mockResolvedValue({
+      expectedChunks: 0,
+      sentChunks: 0,
+      voiceExpected: false,
+      voiceSent: false,
+      attachmentsExpected: 3,
+      attachmentsSent: 1,
+      empty: false,
+    });
+
+    const app = await importApp();
+    const res = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body: JSON.stringify({
+          type: 'complete',
+          user_id: '1001',
+          message_key: 'telegram:partial-attachments',
+          chat_id: '2002',
+          attachments: [
+            { type: 'audio', url: 'a.ogg', mime_type: 'audio/ogg' },
+            { type: 'audio', url: 'b.ogg', mime_type: 'audio/ogg' },
+            { type: 'audio', url: 'c.ogg', mime_type: 'audio/ogg' },
+          ],
+        }),
+      },
+      makeEnv()
+    );
+    expect(res.status).toBe(502);
+  });
+
   it('POST /progress-callback succeeds on an empty engine payload without marking failure', async () => {
     dispatchEngineResponse.mockResolvedValue({
+      expectedChunks: 0,
       sentChunks: 0,
+      voiceExpected: false,
       voiceSent: false,
+      attachmentsExpected: 0,
       attachmentsSent: 0,
       empty: true,
     });

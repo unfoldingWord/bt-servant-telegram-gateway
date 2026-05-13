@@ -36,13 +36,38 @@ describe('dispatchEngineResponse', () => {
     });
 
     expect(result).toEqual({
+      expectedChunks: 0,
       sentChunks: 0,
+      voiceExpected: false,
       voiceSent: false,
+      attachmentsExpected: 0,
       attachmentsSent: 0,
       empty: true,
     });
     expect(telegramClient.sendTextMessage).not.toHaveBeenCalled();
     expect(telegramClient.sendVoice).not.toHaveBeenCalled();
+  });
+
+  it('reports per-category expected/sent counts so the caller can detect partial delivery', async () => {
+    const audioBytes = new Uint8Array([1]);
+    const telegramClient = makeTelegram();
+    // sendTextMessage fails for the second chunk
+    telegramClient.sendTextMessage = vi
+      .fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const engineGateway = makeGateway(audioBytes);
+
+    const result = await dispatchEngineResponse({
+      chatId: '2002',
+      // Long enough to chunk into multiple messages (chunkMessage splits ~4000 char limit)
+      text: 'first.\n\n' + 'x'.repeat(4500),
+      telegramClient: telegramClient as never,
+      engineGateway,
+    });
+
+    expect(result.expectedChunks).toBeGreaterThan(1);
+    expect(result.sentChunks).toBeLessThan(result.expectedChunks);
   });
 
   it('formats engine text as Telegram HTML before sending', async () => {
