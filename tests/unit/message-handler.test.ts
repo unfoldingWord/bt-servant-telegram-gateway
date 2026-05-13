@@ -710,4 +710,280 @@ describe('handleIncomingMessage', () => {
     );
     expect(result).toEqual({ handled: false, reason: 'engine_error' });
   });
+
+  it('sends audio attachments via sendVoice when only attachments are returned', async () => {
+    const audioBytes = new Uint8Array([1, 2, 3, 4]);
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      sendVoice: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn().mockResolvedValue({
+        message: '',
+        attachments: [
+          {
+            type: 'audio',
+            url: 'https://engine.example.com/api/v1/voice-submissions/foo.ogg',
+            mime_type: 'audio/ogg',
+            r2_key: 'voice-submissions/foo.ogg',
+          },
+        ],
+      }),
+      downloadAudio: vi.fn().mockResolvedValue(audioBytes),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: 'play it',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(engineClient.downloadAudio).toHaveBeenCalledWith(
+      'https://engine.example.com/api/v1/voice-submissions/foo.ogg'
+    );
+    expect(telegramClient.sendVoice).toHaveBeenCalledTimes(1);
+    expect(telegramClient.sendVoice).toHaveBeenCalledWith('2002', audioBytes, {
+      messageThreadId: undefined,
+    });
+    expect(telegramClient.sendTextMessage).not.toHaveBeenCalled();
+    expect(result).toEqual({ handled: true, sentChunks: 0 });
+  });
+
+  it('sends TTS voice_audio_url before attachments when both are present', async () => {
+    const ttsBytes = new Uint8Array([9, 9]);
+    const attachmentBytes = new Uint8Array([1, 1]);
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      sendVoice: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn().mockResolvedValue({
+        message: 'here it is',
+        voice_audio_url: '/api/v1/audio/tts.ogg',
+        attachments: [
+          {
+            type: 'audio',
+            url: 'https://engine.example.com/api/v1/voice-submissions/story.ogg',
+            mime_type: 'audio/ogg',
+          },
+        ],
+      }),
+      downloadAudio: vi.fn().mockResolvedValueOnce(ttsBytes).mockResolvedValueOnce(attachmentBytes),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: 'play it',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(telegramClient.sendVoice).toHaveBeenCalledTimes(2);
+    expect(telegramClient.sendVoice).toHaveBeenNthCalledWith(1, '2002', ttsBytes, {
+      messageThreadId: undefined,
+    });
+    expect(telegramClient.sendVoice).toHaveBeenNthCalledWith(2, '2002', attachmentBytes, {
+      messageThreadId: undefined,
+    });
+  });
+
+  it('sends text then audio attachment when both text and attachments are present', async () => {
+    const audioBytes = new Uint8Array([1, 2, 3]);
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      sendVoice: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn().mockResolvedValue({
+        message: "Here's your story.",
+        attachments: [
+          {
+            type: 'audio',
+            url: 'https://engine.example.com/api/v1/voice-submissions/story.ogg',
+            mime_type: 'audio/ogg',
+          },
+        ],
+      }),
+      downloadAudio: vi.fn().mockResolvedValue(audioBytes),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: 'play it',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(telegramClient.sendTextMessage).toHaveBeenCalledWith(
+      '2002',
+      expect.stringContaining("Here's your story."),
+      'HTML'
+    );
+    expect(telegramClient.sendVoice).toHaveBeenCalledTimes(1);
+    expect(telegramClient.sendVoice).toHaveBeenCalledWith('2002', audioBytes, {
+      messageThreadId: undefined,
+    });
+  });
+
+  it('treats an empty attachments array as no attachments', async () => {
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      sendVoice: vi.fn(),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn().mockResolvedValue({
+        message: 'hi',
+        attachments: [],
+      }),
+      downloadAudio: vi.fn(),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: 'hello',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(telegramClient.sendVoice).not.toHaveBeenCalled();
+    expect(engineClient.downloadAudio).not.toHaveBeenCalled();
+    expect(telegramClient.sendTextMessage).toHaveBeenCalled();
+    expect(result).toEqual({ handled: true, sentChunks: 1 });
+  });
+
+  it('skips non-audio attachments, isolates fetch failures, and continues with later attachments', async () => {
+    const audioBytes = new Uint8Array([7, 7, 7]);
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      sendVoice: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessage: vi.fn().mockResolvedValue({
+        message: '',
+        attachments: [
+          { type: 'image', url: 'https://engine.example.com/img.png' },
+          {
+            type: 'audio',
+            url: 'https://engine.example.com/api/v1/voice-submissions/missing.ogg',
+            mime_type: 'audio/ogg',
+          },
+          {
+            type: 'audio',
+            url: 'https://engine.example.com/api/v1/voice-submissions/good.ogg',
+            mime_type: 'audio/ogg',
+          },
+        ],
+      }),
+      downloadAudio: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(audioBytes),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+
+    await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: 'play it',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+      }
+    );
+
+    expect(engineClient.downloadAudio).toHaveBeenCalledTimes(2);
+    expect(telegramClient.sendVoice).toHaveBeenCalledTimes(1);
+    expect(telegramClient.sendVoice).toHaveBeenCalledWith('2002', audioBytes, {
+      messageThreadId: undefined,
+    });
+  });
 });
