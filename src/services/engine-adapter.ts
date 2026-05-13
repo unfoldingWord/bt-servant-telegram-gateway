@@ -2,6 +2,7 @@ import {
   EngineClient,
   type EngineMessageContext,
   type ChatResponse,
+  type AsyncChatAck,
   type ModeScope,
   type ModeSummary,
 } from './engine-client.js';
@@ -20,6 +21,16 @@ export interface AudioReplyRequest {
   context?: EngineMessageContext | undefined;
 }
 
+export interface AsyncFinalReplyRequest extends FinalReplyRequest {
+  messageKey: string;
+  progressCallbackUrl: string;
+}
+
+export interface AsyncAudioReplyRequest extends AudioReplyRequest {
+  messageKey: string;
+  progressCallbackUrl: string;
+}
+
 export class EngineGateway {
   constructor(private readonly client: EngineClient) {}
 
@@ -32,6 +43,28 @@ export class EngineGateway {
       request.userId,
       request.audioBase64,
       request.audioFormat,
+      request.captionText,
+      request.context ?? {}
+    );
+  }
+
+  async requestFinalReplyAsync(request: AsyncFinalReplyRequest): Promise<AsyncChatAck> {
+    return this.client.sendTextMessageAsync(
+      request.userId,
+      request.message,
+      request.messageKey,
+      request.progressCallbackUrl,
+      request.context ?? {}
+    );
+  }
+
+  async requestAudioReplyAsync(request: AsyncAudioReplyRequest): Promise<AsyncChatAck> {
+    return this.client.sendAudioMessageAsync(
+      request.userId,
+      request.audioBase64,
+      request.audioFormat,
+      request.messageKey,
+      request.progressCallbackUrl,
       request.captionText,
       request.context ?? {}
     );

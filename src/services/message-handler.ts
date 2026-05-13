@@ -4,18 +4,10 @@ import {
   isSupportedMessageType,
   type IncomingMessage,
 } from '../core/models.js';
-import {
-  type ChatAttachment,
-  type ChatResponse,
-  EngineClient,
-  type ModeScope,
-  type ModeSummary,
-} from './engine-client.js';
+import { EngineClient, type ModeScope, type ModeSummary } from './engine-client.js';
 import { EngineGateway } from './engine-adapter.js';
-import { formatEngineResponse } from './engine-response-format.js';
-import { chunkMessage } from './chunking.js';
-import { formatTelegramHtml } from './telegram-format.js';
 import { uint8ArrayToBase64 } from './encoding.js';
+import { sendChatAction, sendTextMessage, sendTypingIndicator } from './response-dispatch.js';
 import { TelegramClient } from '../telegram/client.js';
 
 export interface MessageHandlerDependencies {
@@ -24,12 +16,14 @@ export interface MessageHandlerDependencies {
   engineGateway?: EngineGateway;
   fallbackMessage?: string;
   forwardAllGroupMessages?: boolean;
+  progressCallbackUrl?: string | undefined;
 }
 
 export interface MessageHandlerResult {
   handled: boolean;
-  reason?: 'unsupported_message' | 'too_old' | 'engine_error' | 'reset' | 'mode';
+  reason?: 'unsupported_message' | 'too_old' | 'engine_error' | 'reset' | 'mode' | 'accepted';
   sentChunks?: number;
+  messageKey?: string;
 }
 
 const DEFAULT_FALLBACK_MESSAGE = 'Sorry, something went wrong. Please try again.';
@@ -41,6 +35,7 @@ export async function handleIncomingMessage(
   const { telegramClient, engineClient } = dependencies;
   const engineGateway = dependencies.engineGateway ?? new EngineGateway(engineClient);
   const fallbackMessage = dependencies.fallbackMessage ?? DEFAULT_FALLBACK_MESSAGE;
+  const progressCallbackUrl = dependencies.progressCallbackUrl;
 
   console.info('Handling incoming message', {
     userId: message.user_id,
@@ -146,10 +141,22 @@ export async function handleIncomingMessage(
     message.message_type === MessageType.VOICE || message.message_type === MessageType.AUDIO;
 
   if (isVoice) {
-    return handleVoiceMessage(message, engineGateway, telegramClient, fallbackMessage);
+    return handleVoiceMessage(
+      message,
+      engineGateway,
+      telegramClient,
+      fallbackMessage,
+      progressCallbackUrl
+    );
   }
 
-  return handleTextEngineRequest(message, engineGateway, telegramClient, fallbackMessage);
+  return handleTextEngineRequest(
+    message,
+    engineGateway,
+    telegramClient,
+    fallbackMessage,
+    progressCallbackUrl
+  );
 }
 
 function buildEngineContext(message: IncomingMessage) {
@@ -167,23 +174,36 @@ async function handleTextEngineRequest(
   message: IncomingMessage,
   engineGateway: EngineGateway,
   telegramClient: TelegramClient,
-  fallbackMessage: string
+  fallbackMessage: string,
+  progressCallbackUrl: string | undefined
 ): Promise<MessageHandlerResult> {
   void sendTypingIndicator(telegramClient, message.chat_id, message.thread_id);
 
+  if (!progressCallbackUrl) {
+    console.error('progressCallbackUrl is required for async chat transport', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+    });
+    await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
+    return { handled: false, reason: 'engine_error' };
+  }
+
+  const messageKey = crypto.randomUUID();
   try {
-    const response = await engineGateway.requestFinalReply({
+    await engineGateway.requestFinalReplyAsync({
       userId: message.user_id,
       message: message.text,
+      messageKey,
+      progressCallbackUrl,
       context: buildEngineContext(message),
     });
-
-    return sendEngineResponse(response, message, telegramClient, engineGateway);
+    return { handled: true, reason: 'accepted', messageKey };
   } catch (error) {
     console.error('Text message handler failed', {
       userId: message.user_id,
       chatId: message.chat_id,
       messageId: message.message_id,
+      messageKey,
       error: error instanceof Error ? error.message : 'Unknown error',
     });
     await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
@@ -195,10 +215,21 @@ async function handleVoiceMessage(
   message: IncomingMessage,
   engineGateway: EngineGateway,
   telegramClient: TelegramClient,
-  fallbackMessage: string
+  fallbackMessage: string,
+  progressCallbackUrl: string | undefined
 ): Promise<MessageHandlerResult> {
   void sendChatAction(telegramClient, message.chat_id, 'upload_voice', message.thread_id);
 
+  if (!progressCallbackUrl) {
+    console.error('progressCallbackUrl is required for async chat transport', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+    });
+    await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
+    return { handled: false, reason: 'engine_error' };
+  }
+
+  const messageKey = crypto.randomUUID();
   try {
     if (!message.file_id) {
       console.error('Voice message missing file_id', { messageId: message.message_id });
@@ -215,20 +246,23 @@ async function handleVoiceMessage(
     const audioBase64 = uint8ArrayToBase64(audioBytes);
     const audioFormat = message.mime_type ?? 'audio/ogg';
 
-    const response = await engineGateway.requestAudioReply({
+    await engineGateway.requestAudioReplyAsync({
       userId: message.user_id,
       audioBase64,
       audioFormat,
+      messageKey,
+      progressCallbackUrl,
       captionText: message.text || undefined,
       context: buildEngineContext(message),
     });
 
-    return sendEngineResponse(response, message, telegramClient, engineGateway);
+    return { handled: true, reason: 'accepted', messageKey };
   } catch (error) {
     console.error('Voice message handler failed', {
       userId: message.user_id,
       chatId: message.chat_id,
       messageId: message.message_id,
+      messageKey,
       error: error instanceof Error ? error.message : 'Unknown error',
     });
     await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
@@ -248,170 +282,11 @@ async function downloadVoiceFile(
   return telegramClient.downloadFile(file.file_path);
 }
 
-async function sendEngineResponse(
-  response: ChatResponse,
-  message: IncomingMessage,
-  telegramClient: TelegramClient,
-  engineGateway: EngineGateway
-): Promise<MessageHandlerResult> {
-  const hasText = response.message.trim().length > 0;
-  const hasVoice = !!response.voice_audio_url;
-  const attachments = Array.isArray(response.attachments) ? response.attachments : [];
-  const hasAttachments = attachments.length > 0;
-
-  console.info('Engine response received', {
-    userId: message.user_id,
-    chatId: message.chat_id,
-    hasText,
-    hasVoice,
-    attachmentCount: attachments.length,
-    text: previewText(response.message),
-  });
-
-  if (!hasText && !hasVoice && !hasAttachments) {
-    console.info('Engine returned empty response, sending nothing', {
-      userId: message.user_id,
-      chatId: message.chat_id,
-    });
-    return { handled: true, sentChunks: 0 };
-  }
-
-  let sentChunks = 0;
-  if (hasText) {
-    sentChunks = await sendTextChunks(response.message, message, telegramClient);
-  }
-
-  if (hasVoice) {
-    await sendVoiceResponse(response.voice_audio_url!, message, telegramClient, engineGateway);
-  }
-
-  let attachmentsSent = 0;
-  for (let i = 0; i < attachments.length; i++) {
-    const sent = await sendAudioAttachment(
-      attachments[i]!,
-      i,
-      message,
-      telegramClient,
-      engineGateway
-    );
-    if (sent) attachmentsSent += 1;
-  }
-
-  console.info('Message handled', {
-    userId: message.user_id,
-    chatId: message.chat_id,
-    sentChunks,
-    voiceSent: hasVoice,
-    attachmentsSent,
-  });
-
-  return { handled: true, sentChunks };
-}
-
-async function sendAudioAttachment(
-  attachment: ChatAttachment,
-  index: number,
-  message: IncomingMessage,
-  telegramClient: TelegramClient,
-  engineGateway: EngineGateway
-): Promise<boolean> {
-  if (attachment.type !== 'audio') {
-    console.info('Skipping non-audio attachment', { index, type: attachment.type });
-    return false;
-  }
-  if (attachment.mime_type !== 'audio/ogg') {
-    console.warn('Audio attachment mime_type is not audio/ogg; attempting sendVoice anyway', {
-      index,
-      mimeType: attachment.mime_type,
-      url: attachment.url,
-    });
-  }
-
-  void sendChatAction(telegramClient, message.chat_id, 'upload_voice', message.thread_id);
-
-  const audioData = await engineGateway.downloadVoiceAudio(attachment.url);
-  if (!audioData) {
-    console.error('Attachment fetch failed', {
-      index,
-      url: attachment.url,
-      mimeType: attachment.mime_type,
-    });
-    return false;
-  }
-
-  const sent = await telegramClient.sendVoice(message.chat_id, audioData, {
-    messageThreadId: message.thread_id,
-  });
-  console.info('Audio attachment sent', {
-    index,
-    url: attachment.url,
-    mimeType: attachment.mime_type,
-    sent,
-    sizeBytes: audioData.length,
-  });
-  return sent;
-}
-
-async function sendTextChunks(
-  text: string,
-  message: IncomingMessage,
-  telegramClient: TelegramClient
-): Promise<number> {
-  const formattedResponse = formatEngineResponse(text);
-  const chunks = chunkMessage(formattedResponse);
-  let sentChunks = 0;
-
-  for (const chunk of chunks) {
-    const renderedChunk = formatTelegramHtml(chunk);
-    const ok = await sendTextMessage(
-      telegramClient,
-      message.chat_id,
-      renderedChunk,
-      message.thread_id,
-      'HTML'
-    );
-    if (ok) sentChunks += 1;
-  }
-
-  return sentChunks;
-}
-
-async function sendVoiceResponse(
-  voiceAudioUrl: string,
-  message: IncomingMessage,
-  telegramClient: TelegramClient,
-  engineGateway: EngineGateway
-): Promise<void> {
-  void sendChatAction(telegramClient, message.chat_id, 'upload_voice', message.thread_id);
-
-  const audioData = await engineGateway.downloadVoiceAudio(voiceAudioUrl);
-  if (!audioData) {
-    console.error('Failed to download voice audio from engine', {
-      userId: message.user_id,
-      chatId: message.chat_id,
-      voiceAudioUrl,
-    });
-    return;
-  }
-
-  const sent = await telegramClient.sendVoice(message.chat_id, audioData, {
-    messageThreadId: message.thread_id,
-  });
-
-  console.info('Voice message sent', {
-    userId: message.user_id,
-    chatId: message.chat_id,
-    sent,
-    sizeBytes: audioData.length,
-  });
-}
-
 function previewText(text: string, maxLength = 240): string {
   const normalized = text.replace(/\s+/gu, ' ').trim();
   if (normalized.length <= maxLength) {
     return normalized;
   }
-
   return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
@@ -634,68 +509,4 @@ function buildHelpMessage(): string {
     '- Reset the current conversation with /reset',
     '- Switch modes with /mode <name> (or /mode to list, /mode default to clear)',
   ].join('\n');
-}
-
-async function sendTextMessage(
-  telegramClient: TelegramClient,
-  chatId: string,
-  text: string,
-  threadId?: string,
-  parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML'
-): Promise<boolean> {
-  if (threadId) {
-    if (parseMode) {
-      return telegramClient.sendTextMessage(chatId, text, parseMode, threadId);
-    }
-
-    return telegramClient.sendTextMessage(chatId, text, undefined, threadId);
-  }
-
-  if (parseMode) {
-    return telegramClient.sendTextMessage(chatId, text, parseMode);
-  }
-
-  return telegramClient.sendTextMessage(chatId, text);
-}
-
-async function sendChatAction(
-  telegramClient: TelegramClient,
-  chatId: string,
-  action:
-    | 'typing'
-    | 'upload_photo'
-    | 'record_video'
-    | 'upload_video'
-    | 'record_voice'
-    | 'upload_voice'
-    | 'upload_document'
-    | 'find_location'
-    | 'record_video_note'
-    | 'upload_video_note',
-  threadId?: string
-): Promise<boolean> {
-  if (threadId) {
-    return telegramClient.sendChatAction(chatId, action, threadId);
-  }
-
-  return telegramClient.sendChatAction(chatId, action);
-}
-
-async function sendTypingIndicator(
-  telegramClient: TelegramClient,
-  chatId: string,
-  threadId?: string
-): Promise<void> {
-  try {
-    const typingSent = await sendChatAction(telegramClient, chatId, 'typing', threadId);
-    console.info('Typing indicator sent', {
-      chatId,
-      typingSent,
-    });
-  } catch (error) {
-    console.info('Typing indicator skipped', {
-      chatId,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
 }

@@ -6,6 +6,11 @@ export interface ChatAttachment {
   duration_ms?: number | null;
 }
 
+export interface AsyncChatAck {
+  status: 'accepted';
+  message_key: string;
+}
+
 export interface ChatResponse {
   message: string;
   message_key?: string;
@@ -157,6 +162,67 @@ export class EngineClient {
     });
 
     return this.sendChatRequest(payload, userId);
+  }
+
+  async sendTextMessageAsync(
+    userId: string,
+    message: string,
+    messageKey: string,
+    progressCallbackUrl: string,
+    context: EngineMessageContext = {}
+  ): Promise<AsyncChatAck> {
+    const payload = {
+      client_id: 'telegram-gateway',
+      user_id: userId,
+      message_type: 'text' as const,
+      message,
+      message_key: messageKey,
+      progress_callback_url: progressCallbackUrl,
+      progress_mode: 'complete' as const,
+      ...this.buildContextFields(context),
+    };
+
+    console.info('Engine sendTextMessageAsync start', {
+      userId,
+      messageKey,
+      ...this.logContext(context),
+      messageLength: message.length,
+    });
+
+    return this.sendChatCallbackRequest(payload, userId, messageKey);
+  }
+
+  async sendAudioMessageAsync(
+    userId: string,
+    audioBase64: string,
+    audioFormat: string,
+    messageKey: string,
+    progressCallbackUrl: string,
+    captionText?: string,
+    context: EngineMessageContext = {}
+  ): Promise<AsyncChatAck> {
+    const payload = {
+      client_id: 'telegram-gateway',
+      user_id: userId,
+      message_type: 'audio' as const,
+      audio_base64: audioBase64,
+      audio_format: audioFormat,
+      message_key: messageKey,
+      progress_callback_url: progressCallbackUrl,
+      progress_mode: 'complete' as const,
+      ...(captionText ? { message: captionText } : {}),
+      ...this.buildContextFields(context),
+    };
+
+    console.info('Engine sendAudioMessageAsync start', {
+      userId,
+      messageKey,
+      ...this.logContext(context),
+      audioFormat,
+      audioBase64Length: audioBase64.length,
+    });
+
+    return this.sendChatCallbackRequest(payload, userId, messageKey);
   }
 
   async getUserPreferences(userId: string): Promise<UserPreferences> {
@@ -427,6 +493,39 @@ export class EngineClient {
     });
 
     return this.mapChatResponse(data);
+  }
+
+  private async sendChatCallbackRequest(
+    payload: Record<string, unknown>,
+    userId: string,
+    messageKey: string
+  ): Promise<AsyncChatAck> {
+    const startedAt = Date.now();
+    const path = '/api/v1/chat/callback';
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+
+      if (response.status !== 202 && !response.ok) {
+        throw new Error(`Engine API error: ${response.status}`);
+      }
+
+      console.info('Engine chat callback accepted', {
+        userId,
+        messageKey,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+      });
+
+      return { status: 'accepted', message_key: messageKey };
+    } catch (error) {
+      this.logError('sendChatCallback', path, userId, error);
+      throw error;
+    }
   }
 
   private buildContextFields(context: EngineMessageContext): Record<string, unknown> {

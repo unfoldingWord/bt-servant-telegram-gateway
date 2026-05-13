@@ -275,4 +275,79 @@ describe('EngineClient', () => {
       'Engine API error: 400'
     );
   });
+
+  it('sendTextMessageAsync POSTs /api/v1/chat/callback with callback wiring', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ status: 'accepted' }, 202));
+
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
+
+    const ack = await client.sendTextMessageAsync(
+      'user-1',
+      'hello',
+      'msg-123',
+      'https://gateway.example.com/progress-callback',
+      { chatType: 'group', chatId: 'chat-9', addressedToBot: true }
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://engine.example.com/api/v1/chat/callback',
+      expect.objectContaining({ method: 'POST' })
+    );
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body).toMatchObject({
+      client_id: 'telegram-gateway',
+      user_id: 'user-1',
+      message_type: 'text',
+      message: 'hello',
+      message_key: 'msg-123',
+      progress_callback_url: 'https://gateway.example.com/progress-callback',
+      progress_mode: 'complete',
+      chat_type: 'group',
+      chat_id: 'chat-9',
+      addressed_to_bot: true,
+      org: 'org-1',
+    });
+    expect(ack).toEqual({ status: 'accepted', message_key: 'msg-123' });
+  });
+
+  it('sendAudioMessageAsync POSTs /api/v1/chat/callback with audio fields', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ status: 'accepted' }, 202));
+
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
+
+    await client.sendAudioMessageAsync(
+      'user-1',
+      'BASE64DATA',
+      'audio/ogg',
+      'msg-456',
+      'https://gateway.example.com/progress-callback',
+      undefined,
+      { chatType: 'private', chatId: '2002' }
+    );
+
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body).toMatchObject({
+      message_type: 'audio',
+      audio_base64: 'BASE64DATA',
+      audio_format: 'audio/ogg',
+      message_key: 'msg-456',
+      progress_callback_url: 'https://gateway.example.com/progress-callback',
+      progress_mode: 'complete',
+    });
+  });
+
+  it('sendTextMessageAsync throws on non-2xx response', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: 'denied' }, 403));
+
+    const client = new EngineClient('https://engine.example.com', 'engine-key', 'org-1', 45000);
+
+    await expect(
+      client.sendTextMessageAsync(
+        'user-1',
+        'hi',
+        'msg-err',
+        'https://gateway.example.com/progress-callback'
+      )
+    ).rejects.toThrow('Engine API error: 403');
+  });
 });
