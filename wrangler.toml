@@ -19,13 +19,13 @@ TELEGRAM_TIMEOUT_MS = "15000"
 PROGRESS_THROTTLE_SECONDS = "3"
 MESSAGE_AGE_CUTOFF_IN_SECONDS = "3600"
 LOG_LEVEL = "INFO"
+GATEWAY_PUBLIC_URL = "https://bt-servant-telegram-gateway.unfoldingword.workers.dev"
 
 # Secrets (set via `wrangler secret put`):
 # TELEGRAM_BOT_TOKEN
 # TELEGRAM_BOT_USERNAME
 # WEBHOOK_SECRET_TOKEN
 # ENGINE_API_KEY
-# GATEWAY_PUBLIC_URL
 
 [env.staging]
 name = "bt-servant-telegram-gateway-staging"
@@ -40,3 +40,4 @@ TELEGRAM_TIMEOUT_MS = "15000"
 PROGRESS_THROTTLE_SECONDS = "3"
 MESSAGE_AGE_CUTOFF_IN_SECONDS = "3600"
 LOG_LEVEL = "DEBUG"
+GATEWAY_PUBLIC_URL = "https://bt-servant-telegram-gateway-staging.unfoldingword.workers.dev"
