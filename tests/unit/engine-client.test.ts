@@ -301,7 +301,8 @@ describe('EngineClient', () => {
       message: 'hello',
       message_key: 'msg-123',
       progress_callback_url: 'https://gateway.example.com/progress-callback',
-      progress_mode: 'complete',
+      progress_mode: 'iteration',
+      progress_throttle_seconds: 3,
       chat_type: 'group',
       chat_id: 'chat-9',
       addressed_to_bot: true,
@@ -332,7 +333,8 @@ describe('EngineClient', () => {
       audio_format: 'audio/ogg',
       message_key: 'msg-456',
       progress_callback_url: 'https://gateway.example.com/progress-callback',
-      progress_mode: 'complete',
+      progress_mode: 'iteration',
+      progress_throttle_seconds: 3,
     });
   });
 

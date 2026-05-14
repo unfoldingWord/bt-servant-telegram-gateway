@@ -60,7 +60,8 @@ app.post('/telegram-webhook', async (c) => {
       env.ENGINE_BASE_URL,
       env.ENGINE_API_KEY,
       env.ENGINE_ORG,
-      parseEnvNumber(env.ENGINE_TIMEOUT_MS, 45000)
+      parseEnvNumber(env.ENGINE_TIMEOUT_MS, 45000),
+      parseEnvNumber(env.PROGRESS_THROTTLE_SECONDS, 3)
     );
 
     await handleIncomingMessage(message, {
@@ -124,6 +125,48 @@ app.post('/progress-callback', async (c) => {
     return c.json({ ok: true, message_key: payload.message_key });
   }
 
+  if (payload.type === 'progress') {
+    const chatId = payload.chat_id;
+    if (!chatId) {
+      console.error('Progress callback progress event missing chat_id', {
+        messageKey: payload.message_key,
+        userId: payload.user_id,
+      });
+      return c.json({ ok: true, message_key: payload.message_key });
+    }
+
+    const engineClient = new EngineClient(
+      env.ENGINE_BASE_URL,
+      env.ENGINE_API_KEY,
+      env.ENGINE_ORG,
+      parseEnvNumber(env.ENGINE_TIMEOUT_MS, 45000),
+      parseEnvNumber(env.PROGRESS_THROTTLE_SECONDS, 3)
+    );
+    const engineGateway = new EngineGateway(engineClient);
+
+    try {
+      await dispatchEngineResponse({
+        chatId,
+        threadId: payload.thread_id,
+        text: payload.text,
+        telegramClient,
+        engineGateway,
+        logContext: {
+          userId: payload.user_id,
+          messageKey: payload.message_key,
+          callbackType: 'progress',
+        },
+      });
+    } catch (error) {
+      console.error('Progress callback intermediate dispatch failed', {
+        messageKey: payload.message_key,
+        userId: payload.user_id,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+    return c.json({ ok: true, message_key: payload.message_key });
+  }
+
   if (payload.type === 'error') {
     const chatId = payload.chat_id;
     if (!chatId) {
@@ -169,7 +212,8 @@ app.post('/progress-callback', async (c) => {
     env.ENGINE_BASE_URL,
     env.ENGINE_API_KEY,
     env.ENGINE_ORG,
-    parseEnvNumber(env.ENGINE_TIMEOUT_MS, 45000)
+    parseEnvNumber(env.ENGINE_TIMEOUT_MS, 45000),
+    parseEnvNumber(env.PROGRESS_THROTTLE_SECONDS, 3)
   );
   const engineGateway = new EngineGateway(engineClient);
 
