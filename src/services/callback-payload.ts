@@ -30,10 +30,21 @@ export interface CallbackStatusPayload {
   timestamp?: string;
 }
 
+export interface CallbackProgressPayload {
+  type: 'progress';
+  user_id: string;
+  message_key: string;
+  chat_id?: string;
+  thread_id?: string;
+  text: string;
+  timestamp?: string;
+}
+
 export type CallbackPayload =
   | CallbackCompletePayload
   | CallbackErrorPayload
-  | CallbackStatusPayload;
+  | CallbackStatusPayload
+  | CallbackProgressPayload;
 
 export function parseCallbackPayload(payload: unknown): CallbackPayload | null {
   if (!payload || typeof payload !== 'object') {
@@ -85,6 +96,19 @@ export function parseCallbackPayload(payload: unknown): CallbackPayload | null {
       user_id: userId,
       message_key: messageKey,
       ...(typeof candidate.message === 'string' ? { message: candidate.message } : {}),
+      ...(typeof candidate.timestamp === 'string' ? { timestamp: candidate.timestamp } : {}),
+    };
+  }
+
+  if (type === 'progress') {
+    if (typeof candidate.text !== 'string' || !candidate.text) return null;
+    return {
+      type: 'progress',
+      user_id: userId,
+      message_key: messageKey,
+      text: candidate.text,
+      ...(typeof candidate.chat_id === 'string' ? { chat_id: candidate.chat_id } : {}),
+      ...(typeof candidate.thread_id === 'string' ? { thread_id: candidate.thread_id } : {}),
       ...(typeof candidate.timestamp === 'string' ? { timestamp: candidate.timestamp } : {}),
     };
   }

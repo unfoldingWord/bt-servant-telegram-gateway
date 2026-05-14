@@ -101,11 +101,14 @@ export class EngineClient {
   private readonly headers: Record<string, string>;
   private readonly timeoutMs: number;
 
+  private readonly progressThrottleSeconds: number;
+
   constructor(
     baseUrl: string,
     apiKey: string,
     private readonly org: string | undefined,
-    timeoutMs: number
+    timeoutMs: number,
+    progressThrottleSeconds: number = 3
   ) {
     this.baseUrl = baseUrl;
     this.headers = {
@@ -113,6 +116,7 @@ export class EngineClient {
       'Content-Type': 'application/json',
     };
     this.timeoutMs = timeoutMs;
+    this.progressThrottleSeconds = progressThrottleSeconds;
   }
 
   async sendTextMessage(
@@ -178,7 +182,8 @@ export class EngineClient {
       message,
       message_key: messageKey,
       progress_callback_url: progressCallbackUrl,
-      progress_mode: 'complete' as const,
+      progress_mode: 'iteration' as const,
+      progress_throttle_seconds: this.progressThrottleSeconds,
       ...this.buildContextFields(context),
     };
 
@@ -209,7 +214,8 @@ export class EngineClient {
       audio_format: audioFormat,
       message_key: messageKey,
       progress_callback_url: progressCallbackUrl,
-      progress_mode: 'complete' as const,
+      progress_mode: 'iteration' as const,
+      progress_throttle_seconds: this.progressThrottleSeconds,
       ...(captionText ? { message: captionText } : {}),
       ...this.buildContextFields(context),
     };

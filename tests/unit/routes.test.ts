@@ -452,4 +452,97 @@ describe('Hono routes', () => {
     expect(res.status).toBe(200);
     expect(dispatchEngineResponse).not.toHaveBeenCalled();
   });
+
+  it('POST /progress-callback dispatches intermediate progress events', async () => {
+    dispatchEngineResponse.mockResolvedValue({
+      expectedChunks: 1,
+      sentChunks: 1,
+      voiceExpected: false,
+      voiceSent: false,
+      attachmentsExpected: 0,
+      attachmentsSent: 0,
+      empty: false,
+    });
+    const app = await importApp();
+    const res = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body: JSON.stringify({
+          type: 'progress',
+          user_id: '1001',
+          message_key: 'telegram:prog-1',
+          chat_id: '5005',
+          text: 'thinking...',
+        }),
+      },
+      makeEnv()
+    );
+    expect(res.status).toBe(200);
+    expect(dispatchEngineResponse).toHaveBeenCalledTimes(1);
+    expect(dispatchEngineResponse.mock.calls[0]![0]).toMatchObject({
+      chatId: '5005',
+      text: 'thinking...',
+    });
+
+    // A subsequent complete with the same message_key must still be delivered
+    // (progress events must not poison the completedKeys dedup cache).
+    dispatchEngineResponse.mockClear();
+    dispatchEngineResponse.mockResolvedValue({
+      expectedChunks: 1,
+      sentChunks: 1,
+      voiceExpected: false,
+      voiceSent: false,
+      attachmentsExpected: 0,
+      attachmentsSent: 0,
+      empty: false,
+    });
+    const completeRes = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body: JSON.stringify({
+          type: 'complete',
+          user_id: '1001',
+          message_key: 'telegram:prog-1',
+          chat_id: '5005',
+          text: 'final answer',
+        }),
+      },
+      makeEnv()
+    );
+    expect(completeRes.status).toBe(200);
+    expect(dispatchEngineResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it('POST /progress-callback rejects progress event missing text', async () => {
+    const app = await importApp();
+    const res = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body: JSON.stringify({
+          type: 'progress',
+          user_id: '1001',
+          message_key: 'telegram:prog-2',
+          chat_id: '5005',
+        }),
+      },
+      makeEnv()
+    );
+    expect(res.status).toBe(400);
+    expect(dispatchEngineResponse).not.toHaveBeenCalled();
+  });
 });
