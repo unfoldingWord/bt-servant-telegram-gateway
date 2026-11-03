@@ -65,6 +65,66 @@ describe('handleIncomingMessage', () => {
     expect(telegramClient.sendTextMessage).not.toHaveBeenCalled();
   });
 
+  it('refreshes typing about every 4s after the message is accepted', async () => {
+    vi.useFakeTimers();
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessageAsync: vi
+        .fn()
+        .mockResolvedValue({ status: 'accepted', message_key: 'mk-123' }),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+    let messageKey = '';
+    try {
+      const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+      const result = await handleIncomingMessage(
+        {
+          user_id: '1001',
+          chat_id: '2002',
+          chat_type: 'private',
+          message_id: '42',
+          message_type: MessageType.TEXT,
+          timestamp: Math.floor(Date.now() / 1000),
+          text: 'hello',
+          file_id: null,
+          message_age_cutoff: 3600,
+          speaker: 'Alex',
+          addressed_to_bot: true,
+        },
+        {
+          telegramClient: telegramClient as never,
+          engineClient: engineClient as never,
+          progressCallbackUrl: 'https://gateway.example.com/progress-callback',
+          scheduleBackground: (work) => {
+            void work;
+          },
+        }
+      );
+      messageKey = result.messageKey ?? '';
+      expect(telegramClient.sendChatAction).toHaveBeenCalledTimes(1);
+      expect(telegramClient.sendChatAction).toHaveBeenCalledWith('2002', 'typing');
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(telegramClient.sendChatAction).toHaveBeenCalledTimes(2);
+      expect(engineClient.sendTextMessageAsync).toHaveBeenCalledWith(
+        '1001',
+        'hello',
+        messageKey,
+        'https://gateway.example.com/progress-callback',
+        expect.any(Object)
+      );
+    } finally {
+      const typing = await import('../../src/services/typing-session.js').catch(() => null);
+      if (typing && messageKey) typing.typingSessions.stop(messageKey);
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+    }
+  });
+
   it('ignores unsupported messages', async () => {
     const telegramClient = {
       sendChatAction: vi.fn(),

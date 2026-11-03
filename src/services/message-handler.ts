@@ -8,6 +8,7 @@ import { EngineClient, type ModeScope, type ModeSummary } from './engine-client.
 import { EngineGateway } from './engine-adapter.js';
 import { uint8ArrayToBase64 } from './encoding.js';
 import { sendChatAction, sendTextMessage, sendTypingIndicator } from './response-dispatch.js';
+import { typingSessions, type TypingSession } from './typing-session.js';
 import { TelegramClient } from '../telegram/client.js';
 
 export interface MessageHandlerDependencies {
@@ -17,6 +18,8 @@ export interface MessageHandlerDependencies {
   fallbackMessage?: string;
   forwardAllGroupMessages?: boolean;
   progressCallbackUrl?: string | undefined;
+  scheduleBackground?: ((work: Promise<void>) => void) | undefined;
+  typingSession?: Pick<TypingSession, 'arm' | 'stop'> | undefined;
 }
 
 export interface MessageHandlerResult {
@@ -34,8 +37,6 @@ export async function handleIncomingMessage(
 ): Promise<MessageHandlerResult> {
   const { telegramClient, engineClient } = dependencies;
   const engineGateway = dependencies.engineGateway ?? new EngineGateway(engineClient);
-  const fallbackMessage = dependencies.fallbackMessage ?? DEFAULT_FALLBACK_MESSAGE;
-  const progressCallbackUrl = dependencies.progressCallbackUrl;
 
   console.info('Handling incoming message', {
     userId: message.user_id,
@@ -141,22 +142,10 @@ export async function handleIncomingMessage(
     message.message_type === MessageType.VOICE || message.message_type === MessageType.AUDIO;
 
   if (isVoice) {
-    return handleVoiceMessage(
-      message,
-      engineGateway,
-      telegramClient,
-      fallbackMessage,
-      progressCallbackUrl
-    );
+    return handleVoiceMessage(message, engineGateway, telegramClient, dependencies);
   }
 
-  return handleTextEngineRequest(
-    message,
-    engineGateway,
-    telegramClient,
-    fallbackMessage,
-    progressCallbackUrl
-  );
+  return handleTextEngineRequest(message, engineGateway, telegramClient, dependencies);
 }
 
 function buildEngineContext(message: IncomingMessage) {
@@ -174,10 +163,11 @@ async function handleTextEngineRequest(
   message: IncomingMessage,
   engineGateway: EngineGateway,
   telegramClient: TelegramClient,
-  fallbackMessage: string,
-  progressCallbackUrl: string | undefined
+  dependencies: MessageHandlerDependencies
 ): Promise<MessageHandlerResult> {
-  void sendTypingIndicator(telegramClient, message.chat_id, message.thread_id);
+  const fallbackMessage = dependencies.fallbackMessage ?? DEFAULT_FALLBACK_MESSAGE;
+  const progressCallbackUrl = dependencies.progressCallbackUrl;
+  await sendTypingIndicator(telegramClient, message.chat_id, message.thread_id);
 
   if (!progressCallbackUrl) {
     console.error('progressCallbackUrl is required for async chat transport', {
@@ -190,6 +180,7 @@ async function handleTextEngineRequest(
 
   const messageKey = crypto.randomUUID();
   try {
+    armTyping(message, messageKey, telegramClient, dependencies);
     await engineGateway.requestFinalReplyAsync({
       userId: message.user_id,
       message: message.text,
@@ -199,6 +190,7 @@ async function handleTextEngineRequest(
     });
     return { handled: true, reason: 'accepted', messageKey };
   } catch (error) {
+    sessionFor(dependencies).stop(messageKey);
     console.error('Text message handler failed', {
       userId: message.user_id,
       chatId: message.chat_id,
@@ -215,9 +207,10 @@ async function handleVoiceMessage(
   message: IncomingMessage,
   engineGateway: EngineGateway,
   telegramClient: TelegramClient,
-  fallbackMessage: string,
-  progressCallbackUrl: string | undefined
+  dependencies: MessageHandlerDependencies
 ): Promise<MessageHandlerResult> {
+  const fallbackMessage = dependencies.fallbackMessage ?? DEFAULT_FALLBACK_MESSAGE;
+  const progressCallbackUrl = dependencies.progressCallbackUrl;
   void sendChatAction(telegramClient, message.chat_id, 'upload_voice', message.thread_id);
 
   if (!progressCallbackUrl) {
@@ -231,33 +224,17 @@ async function handleVoiceMessage(
 
   const messageKey = crypto.randomUUID();
   try {
-    if (!message.file_id) {
-      console.error('Voice message missing file_id', { messageId: message.message_id });
-      await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
-      return { handled: false, reason: 'engine_error' };
-    }
-
-    const audioBytes = await downloadVoiceFile(telegramClient, message.file_id);
-    if (!audioBytes) {
-      await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
-      return { handled: false, reason: 'engine_error' };
-    }
-
-    const audioBase64 = uint8ArrayToBase64(audioBytes);
-    const audioFormat = message.mime_type ?? 'audio/ogg';
-
-    await engineGateway.requestAudioReplyAsync({
-      userId: message.user_id,
-      audioBase64,
-      audioFormat,
+    const accepted = await forwardVoiceToEngine(
+      message,
       messageKey,
-      progressCallbackUrl,
-      captionText: message.text || undefined,
-      context: buildEngineContext(message),
-    });
-
+      engineGateway,
+      telegramClient,
+      dependencies
+    );
+    if (!accepted) return { handled: false, reason: 'engine_error' };
     return { handled: true, reason: 'accepted', messageKey };
   } catch (error) {
+    sessionFor(dependencies).stop(messageKey);
     console.error('Voice message handler failed', {
       userId: message.user_id,
       chatId: message.chat_id,
@@ -270,6 +247,41 @@ async function handleVoiceMessage(
   }
 }
 
+async function forwardVoiceToEngine(
+  message: IncomingMessage,
+  messageKey: string,
+  engineGateway: EngineGateway,
+  telegramClient: TelegramClient,
+  dependencies: MessageHandlerDependencies
+): Promise<boolean> {
+  const fallbackMessage = dependencies.fallbackMessage ?? DEFAULT_FALLBACK_MESSAGE;
+  const progressCallbackUrl = dependencies.progressCallbackUrl;
+  if (!message.file_id || !progressCallbackUrl) {
+    console.error('Voice message missing file_id', { messageId: message.message_id });
+    await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
+    return false;
+  }
+
+  const audioBytes = await downloadVoiceFile(telegramClient, message.file_id);
+  if (!audioBytes) {
+    await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
+    return false;
+  }
+
+  const audioBase64 = uint8ArrayToBase64(audioBytes);
+  armTyping(message, messageKey, telegramClient, dependencies);
+  await engineGateway.requestAudioReplyAsync({
+    userId: message.user_id,
+    audioBase64,
+    audioFormat: message.mime_type ?? 'audio/ogg',
+    messageKey,
+    progressCallbackUrl,
+    captionText: message.text || undefined,
+    context: buildEngineContext(message),
+  });
+  return true;
+}
+
 async function downloadVoiceFile(
   telegramClient: TelegramClient,
   fileId: string
@@ -280,6 +292,23 @@ async function downloadVoiceFile(
     return null;
   }
   return telegramClient.downloadFile(file.file_path);
+}
+
+function sessionFor(dependencies: MessageHandlerDependencies): Pick<TypingSession, 'arm' | 'stop'> {
+  return dependencies.typingSession ?? typingSessions;
+}
+
+function armTyping(
+  message: IncomingMessage,
+  messageKey: string,
+  telegramClient: TelegramClient,
+  dependencies: MessageHandlerDependencies
+): void {
+  sessionFor(dependencies).arm(
+    messageKey,
+    () => sendChatAction(telegramClient, message.chat_id, 'typing', message.thread_id),
+    dependencies.scheduleBackground
+  );
 }
 
 function previewText(text: string, maxLength = 240): string {

@@ -254,15 +254,21 @@ export async function sendTypingIndicator(
   telegramClient: TelegramClient,
   chatId: string,
   threadId?: string
-): Promise<void> {
+): Promise<boolean> {
   try {
     const typingSent = await sendChatAction(telegramClient, chatId, 'typing', threadId);
+    if (!typingSent) {
+      console.error('Typing indicator failed', { chatId });
+      return false;
+    }
     console.info('Typing indicator sent', { chatId, typingSent });
+    return true;
   } catch (error) {
-    console.info('Typing indicator skipped', {
+    console.error('Typing indicator failed', {
       chatId,
       error: error instanceof Error ? error.message : 'Unknown error',
     });
+    return false;
   }
 }
 
