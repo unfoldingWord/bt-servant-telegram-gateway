@@ -3,8 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MessageType } from '../../src/core/models.js';
 
 describe('handleIncomingMessage', () => {
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
+    const typing = await import('../../src/services/typing-session.js');
+    typing.typingSessions.reset();
+    if (vi.isFakeTimers()) {
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+    }
   });
 
   it('sends typing and kicks off async engine call', async () => {
@@ -65,6 +71,63 @@ describe('handleIncomingMessage', () => {
     expect(telegramClient.sendTextMessage).not.toHaveBeenCalled();
   });
 
+  it('starts typing before the engine without waiting for Telegram', async () => {
+    vi.useFakeTimers();
+    let releaseTyping = () => {};
+    const typingGate = new Promise<void>((resolve) => {
+      releaseTyping = resolve;
+    });
+    const telegramClient = {
+      sendChatAction: vi.fn().mockImplementation(() => typingGate.then(() => true)),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    let engineStarted = false;
+    const engineClient = {
+      sendTextMessageAsync: vi.fn().mockImplementation(async () => {
+        engineStarted = true;
+        return { status: 'accepted', message_key: 'mk-123' };
+      }),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+    try {
+      const pending = handleIncomingMessage(
+        {
+          user_id: '1001',
+          chat_id: '2002',
+          chat_type: 'private',
+          message_id: '42',
+          message_type: MessageType.TEXT,
+          timestamp: Math.floor(Date.now() / 1000),
+          text: 'hello',
+          file_id: null,
+          message_age_cutoff: 3600,
+          speaker: 'Alex',
+          addressed_to_bot: true,
+        },
+        {
+          telegramClient: telegramClient as never,
+          engineClient: engineClient as never,
+          progressCallbackUrl: 'https://gateway.example.com/progress-callback',
+          scheduleBackground: (work) => {
+            void work;
+          },
+        }
+      );
+
+      expect(telegramClient.sendChatAction).toHaveBeenCalledWith('2002', 'typing');
+      expect(engineStarted).toBe(true);
+      releaseTyping();
+      const result = await pending;
+      expect(result.reason).toBe('accepted');
+    } finally {
+      releaseTyping();
+    }
+  });
+
   it('refreshes typing about every 4s after the message is accepted', async () => {
     vi.useFakeTimers();
     const telegramClient = {
@@ -123,6 +186,113 @@ describe('handleIncomingMessage', () => {
       await vi.runAllTimersAsync();
       vi.useRealTimers();
     }
+  });
+
+  it('arms typing renewal before the voice download finishes', async () => {
+    vi.useFakeTimers();
+    let releaseDownload = () => {};
+    const downloadGate = new Promise<void>((resolve) => {
+      releaseDownload = resolve;
+    });
+    const scheduled: Promise<void>[] = [];
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      getFile: vi.fn().mockImplementation(async () => {
+        await downloadGate;
+        return { file_id: 'file-1', file_unique_id: 'unique', file_path: 'voice/file.ogg' };
+      }),
+      downloadFile: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
+    };
+    const engineClient = {
+      sendAudioMessageAsync: vi
+        .fn()
+        .mockResolvedValue({ status: 'accepted', message_key: 'mk-voice' }),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+    try {
+      const pending = handleIncomingMessage(voiceIncoming('file-1'), {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+        progressCallbackUrl: 'https://gateway.example.com/progress-callback',
+        scheduleBackground: (work) => {
+          scheduled.push(work);
+        },
+      });
+
+      expect(scheduled).toHaveLength(1);
+      expect(telegramClient.getFile).toHaveBeenCalledWith('file-1');
+      expect(telegramClient.downloadFile).not.toHaveBeenCalled();
+      expect(engineClient.sendAudioMessageAsync).not.toHaveBeenCalled();
+      expect(telegramClient.sendChatAction).toHaveBeenCalledWith('2002', 'upload_voice');
+
+      releaseDownload();
+      const result = await pending;
+      expect(result.reason).toBe('accepted');
+      expect(telegramClient.downloadFile).toHaveBeenCalledWith('voice/file.ogg');
+      expect(engineClient.sendAudioMessageAsync).toHaveBeenCalled();
+      expect(scheduled).toHaveLength(1);
+    } finally {
+      releaseDownload();
+    }
+  });
+
+  it('stops voice typing renewal when the download fails', async () => {
+    vi.useFakeTimers();
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      getFile: vi.fn().mockResolvedValue(null),
+      downloadFile: vi.fn(),
+    };
+    const engineClient = {
+      sendAudioMessageAsync: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+    const result = await handleIncomingMessage(voiceIncoming('file-1'), {
+      telegramClient: telegramClient as never,
+      engineClient: engineClient as never,
+      progressCallbackUrl: 'https://gateway.example.com/progress-callback',
+      scheduleBackground: (work) => {
+        void work;
+      },
+    });
+
+    expect(result).toEqual({ handled: false, reason: 'engine_error' });
+    expect(engineClient.sendAudioMessageAsync).not.toHaveBeenCalled();
+    expect(telegramClient.sendChatAction).toHaveBeenCalledTimes(1);
+    expect(telegramClient.sendChatAction).toHaveBeenCalledWith('2002', 'upload_voice');
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(telegramClient.sendChatAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs a missing voice file id on its own', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      getFile: vi.fn(),
+    };
+    const engineClient = {
+      sendAudioMessageAsync: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+    const result = await handleIncomingMessage(voiceIncoming(null), {
+      telegramClient: telegramClient as never,
+      engineClient: engineClient as never,
+      progressCallbackUrl: 'https://gateway.example.com/progress-callback',
+    });
+
+    expect(result).toEqual({ handled: false, reason: 'engine_error' });
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Voice message missing file_id',
+      expect.objectContaining({ messageId: '42' })
+    );
+    expect(telegramClient.getFile).not.toHaveBeenCalled();
+    expect(engineClient.sendAudioMessageAsync).not.toHaveBeenCalled();
   });
 
   it('ignores unsupported messages', async () => {
@@ -699,3 +869,20 @@ describe('handleIncomingMessage', () => {
     expect(result).toEqual({ handled: false, reason: 'engine_error' });
   });
 });
+
+function voiceIncoming(fileId: string | null) {
+  return {
+    user_id: '1001',
+    chat_id: '2002',
+    chat_type: 'private' as const,
+    message_id: '42',
+    message_type: MessageType.VOICE,
+    timestamp: Math.floor(Date.now() / 1000),
+    text: '',
+    file_id: fileId,
+    mime_type: 'audio/ogg',
+    message_age_cutoff: 3600,
+    speaker: 'Alex',
+    addressed_to_bot: true,
+  };
+}

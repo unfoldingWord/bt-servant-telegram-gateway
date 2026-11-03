@@ -55,8 +55,20 @@ export class TypingSession {
     if (this.isClosed(messageKey)) return;
     const turn = this.upsert(messageKey, send, false);
     if (!turn) return;
-    await this.sendIfDue(messageKey, turn);
+    // Start the send and register the refresh loop before awaiting Telegram,
+    // so the caller can return its HTTP response and keep both in waitUntil.
+    const pending = this.startSendIfDue(messageKey, turn);
     this.ensureLoop(messageKey, turn, schedule);
+    if (pending) await pending;
+  }
+
+  /** Drops open and closed turns so one isolate's tests do not share them. */
+  reset(): void {
+    for (const turn of this.active.values()) {
+      turn.token += 1;
+    }
+    this.active.clear();
+    this.closed.clear();
   }
 
   arm(
@@ -146,10 +158,19 @@ export class TypingSession {
     return turn;
   }
 
-  private async sendIfDue(messageKey: string, turn: ActiveTurn): Promise<void> {
+  private startSendIfDue(messageKey: string, turn: ActiveTurn): Promise<void> | undefined {
     const now = this.now();
-    if (now - turn.lastSentAt < this.refreshMs) return;
+    if (now - turn.lastSentAt < this.refreshMs) return undefined;
     turn.lastSentAt = now;
+    return this.dispatchSend(messageKey, turn);
+  }
+
+  private async sendIfDue(messageKey: string, turn: ActiveTurn): Promise<void> {
+    const pending = this.startSendIfDue(messageKey, turn);
+    if (pending) await pending;
+  }
+
+  private async dispatchSend(messageKey: string, turn: ActiveTurn): Promise<void> {
     try {
       const sent = await turn.send();
       if (!sent) console.error('Typing indicator failed', { messageKey });

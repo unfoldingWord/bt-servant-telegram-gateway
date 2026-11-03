@@ -167,9 +167,10 @@ async function handleTextEngineRequest(
 ): Promise<MessageHandlerResult> {
   const fallbackMessage = dependencies.fallbackMessage ?? DEFAULT_FALLBACK_MESSAGE;
   const progressCallbackUrl = dependencies.progressCallbackUrl;
-  await sendTypingIndicator(telegramClient, message.chat_id, message.thread_id);
+  const typingDone = beginTypingIndicator(telegramClient, message, dependencies);
 
   if (!progressCallbackUrl) {
+    await typingDone;
     console.error('progressCallbackUrl is required for async chat transport', {
       userId: message.user_id,
       chatId: message.chat_id,
@@ -255,21 +256,30 @@ async function forwardVoiceToEngine(
   dependencies: MessageHandlerDependencies
 ): Promise<boolean> {
   const fallbackMessage = dependencies.fallbackMessage ?? DEFAULT_FALLBACK_MESSAGE;
-  const progressCallbackUrl = dependencies.progressCallbackUrl;
-  if (!message.file_id || !progressCallbackUrl) {
+  if (!message.file_id) {
     console.error('Voice message missing file_id', { messageId: message.message_id });
     await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
     return false;
   }
+  const progressCallbackUrl = dependencies.progressCallbackUrl;
+  if (!progressCallbackUrl) {
+    console.error('progressCallbackUrl is required for async chat transport', {
+      userId: message.user_id,
+      chatId: message.chat_id,
+    });
+    await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
+    return false;
+  }
 
+  armTyping(message, messageKey, telegramClient, dependencies);
   const audioBytes = await downloadVoiceFile(telegramClient, message.file_id);
   if (!audioBytes) {
+    sessionFor(dependencies).stop(messageKey);
     await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
     return false;
   }
 
   const audioBase64 = uint8ArrayToBase64(audioBytes);
-  armTyping(message, messageKey, telegramClient, dependencies);
   await engineGateway.requestAudioReplyAsync({
     userId: message.user_id,
     audioBase64,
@@ -296,6 +306,18 @@ async function downloadVoiceFile(
 
 function sessionFor(dependencies: MessageHandlerDependencies): Pick<TypingSession, 'arm' | 'stop'> {
   return dependencies.typingSession ?? typingSessions;
+}
+
+function beginTypingIndicator(
+  telegramClient: TelegramClient,
+  message: IncomingMessage,
+  dependencies: MessageHandlerDependencies
+): Promise<void> {
+  const pending = sendTypingIndicator(telegramClient, message.chat_id, message.thread_id).then(
+    () => undefined
+  );
+  dependencies.scheduleBackground?.(pending);
+  return pending;
 }
 
 function armTyping(

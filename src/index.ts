@@ -125,15 +125,10 @@ app.post('/progress-callback', async (c) => {
   );
 
   if (payload.type === 'status') {
-    try {
-      await showStatusTyping(c, telegramClient, payload);
-    } catch (error) {
-      console.error('Progress callback status typing failed', {
-        messageKey: payload.message_key,
-        userId: payload.user_id,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-    }
+    // Answer before Telegram. showStatusTyping registers the refresh loop
+    // synchronously; waitUntil keeps the in-flight sendChatAction alive.
+    const typing = showStatusTyping(c, telegramClient, payload);
+    if (payload.chat_id) scheduleBackground(c, typing);
     return c.json({ ok: true, message_key: payload.message_key });
   }
 
@@ -293,11 +288,19 @@ async function showStatusTyping(
     });
     return;
   }
-  await typingSessions.show(
-    payload.message_key,
-    () => sendChatAction(telegramClient, chatId, 'typing', payload.thread_id),
-    (work) => scheduleBackground(c, work)
-  );
+  try {
+    await typingSessions.show(
+      payload.message_key,
+      () => sendChatAction(telegramClient, chatId, 'typing', payload.thread_id),
+      (work) => scheduleBackground(c, work)
+    );
+  } catch (error) {
+    console.error('Progress callback status typing failed', {
+      messageKey: payload.message_key,
+      userId: payload.user_id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
 }
 
 export default app;
