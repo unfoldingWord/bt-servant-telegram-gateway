@@ -558,6 +558,7 @@ describe('Hono routes', () => {
     vi.useFakeTimers();
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true })));
     const app = await importApp();
+    const ctx = typingContext();
     const res = await app.request(
       '/progress-callback',
       {
@@ -575,9 +576,10 @@ describe('Hono routes', () => {
         }),
       },
       makeEnv(),
-      typingContext()
+      ctx
     );
 
+    await awaitTypingJobs(ctx);
     expect(res.status).toBe(200);
     expect(chatActionBodies()).toEqual([{ chat_id: '2002', action: 'typing' }]);
     expect(messageBodies()).toEqual([]);
@@ -588,6 +590,7 @@ describe('Hono routes', () => {
     vi.useFakeTimers();
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true })));
     const app = await importApp();
+    const ctx = typingContext();
     const res = await app.request(
       '/progress-callback',
       {
@@ -605,9 +608,10 @@ describe('Hono routes', () => {
         }),
       },
       makeEnv(),
-      typingContext()
+      ctx
     );
 
+    await awaitTypingJobs(ctx);
     expect(res.status).toBe(200);
     expect(chatActionBodies()).toEqual([
       { chat_id: '-5121603836', action: 'typing', message_thread_id: 7 },
@@ -618,6 +622,7 @@ describe('Hono routes', () => {
   it('POST /progress-callback does not type when status has no chat_id', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true })));
     const app = await importApp();
+    const ctx = typingContext();
     const res = await app.request(
       '/progress-callback',
       {
@@ -634,9 +639,10 @@ describe('Hono routes', () => {
         }),
       },
       makeEnv(),
-      typingContext()
+      ctx
     );
 
+    await awaitTypingJobs(ctx);
     expect(res.status).toBe(200);
     expect(chatActionBodies()).toEqual([]);
     expect(messageBodies()).toEqual([]);
@@ -682,6 +688,7 @@ describe('Hono routes', () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
+    await awaitTypingJobs(ctx);
     expect(chatActionBodies()).toEqual([{ chat_id: '2002', action: 'typing' }]);
   });
 
@@ -719,6 +726,7 @@ describe('Hono routes', () => {
       ctx
     );
     expect(status.status).toBe(200);
+    await awaitTypingJobs(ctx);
     expect(chatActionBodies()).toEqual([{ chat_id: '2002', action: 'typing' }]);
     const complete = await app.request(
       '/progress-callback',
@@ -756,6 +764,7 @@ describe('Hono routes', () => {
     expect(complete.status).toBe(200);
     expect(dispatchEngineResponse).toHaveBeenCalledTimes(1);
     expect(late.status).toBe(200);
+    await awaitTypingJobs(ctx);
     expect(chatActionBodies()).toEqual([]);
     expect(messageBodies()).toEqual([]);
   });
@@ -808,7 +817,7 @@ describe('Hono routes', () => {
     );
 
     expect(status.status).toBe(200);
-    await flushMicrotasks();
+    await awaitTypingJobs(ctx);
     expect(error.status).toBe(200);
     expect(messageBodies()).toEqual([
       { chat_id: '2002', text: 'Sorry, something went wrong. Please try again.' },
@@ -834,6 +843,7 @@ describe('Hono routes', () => {
       ctx
     );
     expect(late.status).toBe(200);
+    await awaitTypingJobs(ctx);
     expect(chatActionBodies()).toEqual([]);
     errorSpy.mockRestore();
   });
@@ -954,6 +964,7 @@ describe('Hono routes', () => {
     expect(status.status).toBe(200);
     expect(error.status).toBe(200);
     expect(late.status).toBe(200);
+    await awaitTypingJobs(ctx);
     expect(chatActionBodies()).toEqual([{ chat_id: '2002', action: 'typing' }]);
     expect(messageBodies()).toEqual([
       { chat_id: '2002', text: 'Sorry, something went wrong. Please try again.' },
@@ -1005,12 +1016,41 @@ async function flushMicrotasks(): Promise<void> {
   }
 }
 
-function typingContext(): ExecutionContext {
+type TypingTestContext = ExecutionContext & { jobs: Promise<unknown>[] };
+
+function typingContext(): TypingTestContext {
+  const jobs: Promise<unknown>[] = [];
   return {
-    waitUntil() {},
+    jobs,
+    waitUntil(promise: Promise<unknown>) {
+      jobs.push(promise);
+    },
     passThroughOnException() {},
     props: {},
   };
+}
+
+/**
+ * Waits for waitUntil work that can finish without a timer.
+ * The typing refresh loop sleeps until the turn ends, so it stays pending.
+ */
+async function awaitTypingJobs(ctx: TypingTestContext): Promise<void> {
+  const settled = new Set<Promise<unknown>>();
+  for (const job of ctx.jobs) {
+    void job.then(
+      () => {
+        settled.add(job);
+      },
+      () => {
+        settled.add(job);
+      }
+    );
+  }
+  for (let pass = 0; pass < 4; pass += 1) {
+    const before = settled.size;
+    await flushMicrotasks();
+    if (settled.size === before) return;
+  }
 }
 
 function chatActionBodies(): Array<Record<string, unknown>> {

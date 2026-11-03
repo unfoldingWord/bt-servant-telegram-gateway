@@ -188,6 +188,53 @@ describe('handleIncomingMessage', () => {
     }
   });
 
+  it('stops typing renewal when the engine rejects the text message', async () => {
+    vi.useFakeTimers();
+    const telegramClient = {
+      sendChatAction: vi.fn().mockResolvedValue(true),
+      sendTextMessage: vi.fn().mockResolvedValue(true),
+      setWebhook: vi.fn(),
+    };
+    const engineClient = {
+      sendTextMessageAsync: vi.fn().mockRejectedValue(new Error('boom')),
+      getUserPreferences: vi.fn(),
+      updateUserPreferences: vi.fn(),
+    };
+
+    const { handleIncomingMessage } = await import('../../src/services/message-handler.js');
+    const result = await handleIncomingMessage(
+      {
+        user_id: '1001',
+        chat_id: '2002',
+        chat_type: 'private',
+        message_id: '42',
+        message_type: MessageType.TEXT,
+        timestamp: Math.floor(Date.now() / 1000),
+        text: 'hello',
+        file_id: null,
+        message_age_cutoff: 3600,
+        speaker: 'Alex',
+        addressed_to_bot: true,
+      },
+      {
+        telegramClient: telegramClient as never,
+        engineClient: engineClient as never,
+        progressCallbackUrl: 'https://gateway.example.com/progress-callback',
+        fallbackMessage: 'fallback',
+        scheduleBackground: (work) => {
+          void work;
+        },
+      }
+    );
+
+    expect(result).toEqual({ handled: false, reason: 'engine_error' });
+    expect(telegramClient.sendTextMessage).toHaveBeenCalledWith('2002', 'fallback');
+    expect(telegramClient.sendChatAction).toHaveBeenCalledTimes(1);
+    expect(telegramClient.sendChatAction).toHaveBeenCalledWith('2002', 'typing');
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(telegramClient.sendChatAction).toHaveBeenCalledTimes(1);
+  });
+
   it('arms typing renewal before the voice download finishes', async () => {
     vi.useFakeTimers();
     let releaseDownload = () => {};

@@ -230,7 +230,7 @@ async function handleVoiceMessage(
       messageKey,
       engineGateway,
       telegramClient,
-      dependencies
+      { ...dependencies, progressCallbackUrl }
     );
     if (!accepted) return { handled: false, reason: 'engine_error' };
     return { handled: true, reason: 'accepted', messageKey };
@@ -253,20 +253,11 @@ async function forwardVoiceToEngine(
   messageKey: string,
   engineGateway: EngineGateway,
   telegramClient: TelegramClient,
-  dependencies: MessageHandlerDependencies
+  dependencies: MessageHandlerDependencies & { progressCallbackUrl: string }
 ): Promise<boolean> {
   const fallbackMessage = dependencies.fallbackMessage ?? DEFAULT_FALLBACK_MESSAGE;
   if (!message.file_id) {
     console.error('Voice message missing file_id', { messageId: message.message_id });
-    await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
-    return false;
-  }
-  const progressCallbackUrl = dependencies.progressCallbackUrl;
-  if (!progressCallbackUrl) {
-    console.error('progressCallbackUrl is required for async chat transport', {
-      userId: message.user_id,
-      chatId: message.chat_id,
-    });
     await sendTextMessage(telegramClient, message.chat_id, fallbackMessage, message.thread_id);
     return false;
   }
@@ -285,7 +276,7 @@ async function forwardVoiceToEngine(
     audioBase64,
     audioFormat: message.mime_type ?? 'audio/ogg',
     messageKey,
-    progressCallbackUrl,
+    progressCallbackUrl: dependencies.progressCallbackUrl,
     captionText: message.text || undefined,
     context: buildEngineContext(message),
   });
