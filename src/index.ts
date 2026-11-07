@@ -3,12 +3,14 @@ import type { Env } from './config/types.js';
 import { parseEnvNumber } from './config/types.js';
 import { parseTelegramUpdate } from './core/models.js';
 import { handleIncomingMessage } from './services/message-handler.js';
-import { parseCallbackPayload } from './services/callback-payload.js';
+import { parseCallbackPayload, type CallbackStatusPayload } from './services/callback-payload.js';
 import { CompletedKeysMap } from './services/dedup.js';
 import {
   dispatchEngineResponse,
+  sendChatAction,
   sendTextMessage as sendTelegramTextMessage,
 } from './services/response-dispatch.js';
+import { typingSessions } from './services/typing-session.js';
 import { EngineGateway } from './services/engine-adapter.js';
 import { TelegramClient } from './telegram/client.js';
 import { EngineClient } from './services/engine-client.js';
@@ -69,6 +71,7 @@ app.post('/telegram-webhook', async (c) => {
       engineClient,
       forwardAllGroupMessages: env.FORWARD_ALL_GROUP_MESSAGES === 'true',
       progressCallbackUrl: buildProgressCallbackUrl(env.GATEWAY_PUBLIC_URL),
+      scheduleBackground: (work) => scheduleBackground(c, work),
     }).catch((error) => {
       console.error('Webhook handler failed', {
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -122,6 +125,10 @@ app.post('/progress-callback', async (c) => {
   );
 
   if (payload.type === 'status') {
+    // Answer before Telegram. showStatusTyping registers the refresh loop
+    // synchronously; waitUntil keeps the in-flight sendChatAction alive.
+    const typing = showStatusTyping(c, telegramClient, payload);
+    if (payload.chat_id) scheduleBackground(c, typing);
     return c.json({ ok: true, message_key: payload.message_key });
   }
 
@@ -168,6 +175,7 @@ app.post('/progress-callback', async (c) => {
   }
 
   if (payload.type === 'error') {
+    typingSessions.stop(payload.message_key);
     const chatId = payload.chat_id;
     if (!chatId) {
       console.error('Progress callback error event missing chat_id', {
@@ -191,6 +199,7 @@ app.post('/progress-callback', async (c) => {
   }
 
   // complete
+  typingSessions.stop(payload.message_key);
   if (completedKeys.isCompleted(payload.message_key)) {
     console.info('Duplicate complete callback ignored', {
       messageKey: payload.message_key,
@@ -255,5 +264,43 @@ app.post('/progress-callback', async (c) => {
   completedKeys.markCompleted(payload.message_key);
   return c.json({ ok: true, message_key: payload.message_key });
 });
+
+function scheduleBackground(c: { executionCtx: ExecutionContext }, work: Promise<void>): void {
+  try {
+    c.executionCtx.waitUntil(work);
+  } catch (error) {
+    console.error('Typing refresh was not scheduled', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+}
+
+async function showStatusTyping(
+  c: { executionCtx: ExecutionContext },
+  telegramClient: TelegramClient,
+  payload: CallbackStatusPayload
+): Promise<void> {
+  const chatId = payload.chat_id;
+  if (!chatId) {
+    console.error('Progress callback status event missing chat_id', {
+      messageKey: payload.message_key,
+      userId: payload.user_id,
+    });
+    return;
+  }
+  try {
+    await typingSessions.show(
+      payload.message_key,
+      () => sendChatAction(telegramClient, chatId, 'typing', payload.thread_id),
+      (work) => scheduleBackground(c, work)
+    );
+  } catch (error) {
+    console.error('Progress callback status typing failed', {
+      messageKey: payload.message_key,
+      userId: payload.user_id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+}
 
 export default app;

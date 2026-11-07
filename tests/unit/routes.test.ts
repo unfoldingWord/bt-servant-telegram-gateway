@@ -1,3 +1,4 @@
+import type { ExecutionContext } from '@cloudflare/workers-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const handleIncomingMessage = vi.fn();
@@ -26,7 +27,13 @@ describe('Hono routes', () => {
     globalThis.fetch = fetchMock;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    const typing = await import('../../src/services/typing-session.js');
+    typing.typingSessions.reset();
+    if (vi.isFakeTimers()) {
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+    }
     globalThis.fetch = originalFetch;
     handleIncomingMessage.mockReset();
     dispatchEngineResponse.mockReset();
@@ -484,6 +491,7 @@ describe('Hono routes', () => {
     );
     expect(res.status).toBe(200);
     expect(dispatchEngineResponse).toHaveBeenCalledTimes(1);
+    expect(chatActionBodies()).toEqual([]);
     expect(dispatchEngineResponse.mock.calls[0]![0]).toMatchObject({
       chatId: '5005',
       text: 'thinking...',
@@ -545,4 +553,517 @@ describe('Hono routes', () => {
     expect(res.status).toBe(400);
     expect(dispatchEngineResponse).not.toHaveBeenCalled();
   });
+
+  it('POST /progress-callback sends typing for a status chat and no message', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+    const app = await importApp();
+    const ctx = typingContext();
+    const res = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body: JSON.stringify({
+          type: 'status',
+          user_id: '1001',
+          message_key: 'telegram:status-chat',
+          chat_id: '2002',
+          message: 'Reading John 3:16…',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+
+    await awaitTypingJobs(ctx);
+    expect(res.status).toBe(200);
+    expect(chatActionBodies()).toEqual([{ chat_id: '2002', action: 'typing' }]);
+    expect(messageBodies()).toEqual([]);
+    expect(dispatchEngineResponse).not.toHaveBeenCalled();
+  });
+
+  it('POST /progress-callback sends topic typing to the status thread', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+    const app = await importApp();
+    const ctx = typingContext();
+    const res = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body: JSON.stringify({
+          type: 'status',
+          user_id: '1001',
+          message_key: 'telegram:status-thread',
+          chat_id: '-5121603836',
+          thread_id: '7',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+
+    await awaitTypingJobs(ctx);
+    expect(res.status).toBe(200);
+    expect(chatActionBodies()).toEqual([
+      { chat_id: '-5121603836', action: 'typing', message_thread_id: 7 },
+    ]);
+    expect(messageBodies()).toEqual([]);
+  });
+
+  it('POST /progress-callback does not type when status has no chat_id', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+    const app = await importApp();
+    const ctx = typingContext();
+    const res = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body: JSON.stringify({
+          type: 'status',
+          user_id: '1001',
+          message_key: 'telegram:status-no-chat',
+          message: 'Looking up Translation Words…',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+
+    await awaitTypingJobs(ctx);
+    expect(res.status).toBe(200);
+    expect(chatActionBodies()).toEqual([]);
+    expect(messageBodies()).toEqual([]);
+  });
+
+  it('POST /progress-callback throttles typing for repeated status events', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+    const app = await importApp();
+    const ctx = typingContext();
+    const body = JSON.stringify({
+      type: 'status',
+      user_id: '1001',
+      message_key: 'telegram:status-throttle',
+      chat_id: '2002',
+    });
+    const first = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body,
+      },
+      makeEnv(),
+      ctx
+    );
+    const second = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-engine-token': 'test-engine-key',
+        },
+        body,
+      },
+      makeEnv(),
+      ctx
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    await awaitTypingJobs(ctx);
+    expect(chatActionBodies()).toEqual([{ chat_id: '2002', action: 'typing' }]);
+  });
+
+  it('POST /progress-callback does not restart typing after complete', async () => {
+    vi.useFakeTimers();
+    dispatchEngineResponse.mockResolvedValue({
+      expectedChunks: 1,
+      sentChunks: 1,
+      voiceExpected: false,
+      voiceSent: false,
+      attachmentsExpected: 0,
+      attachmentsSent: 0,
+      empty: false,
+    });
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+    const app = await importApp();
+    const ctx = typingContext();
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-engine-token': 'test-engine-key',
+    };
+    const status = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'status',
+          user_id: '1001',
+          message_key: 'telegram:status-done',
+          chat_id: '2002',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+    expect(status.status).toBe(200);
+    await awaitTypingJobs(ctx);
+    expect(chatActionBodies()).toEqual([{ chat_id: '2002', action: 'typing' }]);
+    const complete = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'complete',
+          user_id: '1001',
+          message_key: 'telegram:status-done',
+          chat_id: '2002',
+          text: 'final answer',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+    fetchMock.mockClear();
+    const late = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'status',
+          user_id: '1001',
+          message_key: 'telegram:status-done',
+          chat_id: '2002',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+
+    expect(complete.status).toBe(200);
+    expect(dispatchEngineResponse).toHaveBeenCalledTimes(1);
+    expect(late.status).toBe(200);
+    await awaitTypingJobs(ctx);
+    expect(chatActionBodies()).toEqual([]);
+    expect(messageBodies()).toEqual([]);
+  });
+
+  it('POST /progress-callback still delivers the error text when typing fails', async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes('/sendChatAction')) {
+        throw new Error('telegram down');
+      }
+      return new Response(JSON.stringify({ ok: true }));
+    });
+    const app = await importApp();
+    const ctx = typingContext();
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-engine-token': 'test-engine-key',
+    };
+    const status = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'status',
+          user_id: '1001',
+          message_key: 'telegram:status-fail',
+          chat_id: '2002',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+    const error = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'error',
+          user_id: '1001',
+          message_key: 'telegram:status-fail',
+          chat_id: '2002',
+          error: 'engine exploded',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+
+    expect(status.status).toBe(200);
+    await awaitTypingJobs(ctx);
+    expect(error.status).toBe(200);
+    expect(messageBodies()).toEqual([
+      { chat_id: '2002', text: 'Sorry, something went wrong. Please try again.' },
+    ]);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Typing indicator failed',
+      expect.objectContaining({ messageKey: 'telegram:status-fail' })
+    );
+    fetchMock.mockClear();
+    const late = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'status',
+          user_id: '1001',
+          message_key: 'telegram:status-fail',
+          chat_id: '2002',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+    expect(late.status).toBe(200);
+    await awaitTypingJobs(ctx);
+    expect(chatActionBodies()).toEqual([]);
+    errorSpy.mockRestore();
+  });
+
+  it('POST /progress-callback answers status before sendChatAction finishes', async () => {
+    vi.useFakeTimers();
+    let releaseTyping = () => {};
+    const typingGate = new Promise<void>((resolve) => {
+      releaseTyping = resolve;
+    });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes('/sendChatAction')) await typingGate;
+      return new Response(JSON.stringify({ ok: true }));
+    });
+    const jobs: Promise<unknown>[] = [];
+    const ctx: ExecutionContext = {
+      waitUntil(promise: Promise<unknown>) {
+        jobs.push(promise);
+      },
+      passThroughOnException() {},
+      props: {},
+    };
+    const app = await importApp();
+    let status: number | undefined;
+    const pending = Promise.resolve(
+      app.request(
+        '/progress-callback',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-engine-token': 'test-engine-key',
+          },
+          body: JSON.stringify({
+            type: 'status',
+            user_id: '1001',
+            message_key: 'telegram:status-fast-ack',
+            chat_id: '2002',
+          }),
+        },
+        makeEnv(),
+        ctx
+      )
+    ).then((res) => {
+      status = res.status;
+      return res;
+    });
+
+    try {
+      await flushMicrotasks();
+      expect(status).toBe(200);
+      expect(chatActionBodies()).toEqual([{ chat_id: '2002', action: 'typing' }]);
+      expect(messageBodies()).toEqual([]);
+      expect(jobs.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      releaseTyping();
+      await flushMicrotasks();
+      await pending;
+    }
+  });
+
+  it('POST /progress-callback does not restart typing after error', async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ ok: true })));
+    const app = await importApp();
+    const ctx = typingContext();
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-engine-token': 'test-engine-key',
+    };
+    const status = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'status',
+          user_id: '1001',
+          message_key: 'telegram:status-then-error',
+          chat_id: '2002',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+    const error = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'error',
+          user_id: '1001',
+          message_key: 'telegram:status-then-error',
+          chat_id: '2002',
+          error: 'engine exploded',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+    const late = await app.request(
+      '/progress-callback',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'status',
+          user_id: '1001',
+          message_key: 'telegram:status-then-error',
+          chat_id: '2002',
+        }),
+      },
+      makeEnv(),
+      ctx
+    );
+
+    expect(status.status).toBe(200);
+    expect(error.status).toBe(200);
+    expect(late.status).toBe(200);
+    await awaitTypingJobs(ctx);
+    expect(chatActionBodies()).toEqual([{ chat_id: '2002', action: 'typing' }]);
+    expect(messageBodies()).toEqual([
+      { chat_id: '2002', text: 'Sorry, something went wrong. Please try again.' },
+    ]);
+  });
+
+  it('POST /telegram-webhook schedules typing refresh with waitUntil', async () => {
+    const jobs: Promise<unknown>[] = [];
+    handleIncomingMessage.mockImplementation(async (_message, deps) => {
+      const schedule = (deps as { scheduleBackground?: (work: Promise<void>) => void })
+        .scheduleBackground;
+      schedule?.(Promise.resolve());
+      return { handled: true, reason: 'accepted' };
+    });
+    const app = await importApp();
+    const req = new Request('http://localhost/telegram-webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'webhook-secret',
+      },
+      body: JSON.stringify({
+        update_id: 1,
+        message: {
+          message_id: 42,
+          from: { id: 1001, is_bot: false, first_name: 'Alex' },
+          chat: { id: 2002, type: 'private' },
+          date: Math.floor(Date.now() / 1000),
+          text: 'hello',
+        },
+      }),
+    });
+    const res = await app.fetch(req, makeEnv(), {
+      waitUntil(promise: Promise<unknown>) {
+        jobs.push(promise);
+      },
+      passThroughOnException() {},
+      props: {},
+    });
+
+    expect(res.status).toBe(200);
+    expect(jobs).toHaveLength(1);
+  });
 });
+
+async function flushMicrotasks(): Promise<void> {
+  for (let step = 0; step < 20; step += 1) {
+    await Promise.resolve();
+  }
+}
+
+type TypingTestContext = ExecutionContext & { jobs: Promise<unknown>[] };
+
+function typingContext(): TypingTestContext {
+  const jobs: Promise<unknown>[] = [];
+  return {
+    jobs,
+    waitUntil(promise: Promise<unknown>) {
+      jobs.push(promise);
+    },
+    passThroughOnException() {},
+    props: {},
+  };
+}
+
+/**
+ * Waits for waitUntil work that can finish without a timer.
+ * The typing refresh loop sleeps until the turn ends, so it stays pending.
+ */
+async function awaitTypingJobs(ctx: TypingTestContext): Promise<void> {
+  const settled = new Set<Promise<unknown>>();
+  for (const job of ctx.jobs) {
+    void job.then(
+      () => {
+        settled.add(job);
+      },
+      () => {
+        settled.add(job);
+      }
+    );
+  }
+  for (let pass = 0; pass < 4; pass += 1) {
+    const before = settled.size;
+    await flushMicrotasks();
+    if (settled.size === before) return;
+  }
+}
+
+function chatActionBodies(): Array<Record<string, unknown>> {
+  return jsonBodies('/sendChatAction');
+}
+
+function messageBodies(): Array<Record<string, unknown>> {
+  return jsonBodies('/sendMessage');
+}
+
+function jsonBodies(path: string): Array<Record<string, unknown>> {
+  const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+  return fetchMock.mock.calls
+    .filter((call) => String(call[0]).includes(path))
+    .map((call) => JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown>);
+}
